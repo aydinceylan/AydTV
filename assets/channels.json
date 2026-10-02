@@ -1,0 +1,247 @@
+[
+  {
+    "id": "trt1",
+    "name": "TRT 1",
+    "category": "Ulusal",
+    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/TRT_1_logo_%282021-%29.svg/960px-TRT_1_logo_%282021-%29.svg.png",
+    "url": "https://tv-trt1.medya.trt.com.tr/master.m3u8"
+  },
+  {
+    "id": "atv",
+    "name": "ATV",
+    "category": "Ulusal",
+    "logo": "https://i.imgur.com/HyVUwFC.png",
+    "url": "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/atv/atv_1080p.m3u8"
+  },
+  {
+    "id": "nowtv",
+    "name": "NOW TV",
+    "category": "Ulusal",
+    "logo": "https://i.imgur.com/5EYjWK7.png",
+    "url": "https://uycyyuuzyh.turknet.ercdn.net/nphindgytw/nowtv/nowtv.m3u8"
+  },
+  {
+    "id": "kanald",
+    "name": "Kanal D",
+    "category": "Ulusal",
+    "logo": "https://i.imgur.com/9o1atM6.png",
+    "url": "https://demiroren.daioncdn.net/kanald/kanald.m3u8?app=kanald_web&ce=3"
+  },
+  {
+    "id": "tv8",
+    "name": "TV8",
+    "category": "Ulusal",
+    "logo": "https://upload.wikimedia.org/wikipedia/tr/thumb/6/68/Tv8_Yeni_Logo.png/960px-Tv8_Yeni_Logo.png",
+    "url": "https://tv8.daioncdn.net/tv8/tv8.m3u8?app=7ddc255a-ef47-4e81-ab14-c0e5f2949788&ce=3"
+  },
+  {
+    "id": "startv",
+    "name": "Star TV",
+    "category": "Ulusal",
+    "logo": "https://i.imgur.com/9O3DHRB.png",
+    "url": "https://dogus.daioncdn.net/startv/startv_720p.m3u8?app=a20ac41e-bdc3-4aa1-934d-26b484480ac9&ce=3&sid=8l4w3lst4co5"
+  },
+  {
+    "id": "showturk",
+    "name": "Show Türk",
+    "category": "Ulusal",
+    "logo": "https://i.imgur.com/fdZpGDj.png",
+    "url": "https://raw.githubusercontent.com/bnyusuf67-crypto/streams/refs/heads/main/streams/shturk.m3u8"
+  },
+  {
+    "id": "kanal7",
+    "name": "Kanal 7",
+    "category": "Ulusal",
+    "logo": "https://i.imgur.com/0gq9xOm.png",
+    "url": "https://kanal7.blutv.com/blutv_kanal7_live/live.m3u8"
+  },
+  {
+    "id": "ntv",
+    "name": "NTV",
+    "category": "Haber",
+    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/NTV_%28Turkey%29_logo.svg/960px-NTV_%28Turkey%29_logo.svg.png",
+    "url": "https://dogus.daioncdn.net/ntv/ntv.m3u8?app=ntv_web"
+  },
+  {
+    "id": "trthaber",
+    "name": "TRT Haber",
+    "category": "Haber",
+    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/72/TRT_Haber_Eyl%C3%BCl_2020_Logo.svg/960px-TRT_Haber_Eyl%C3%BCl_2020_Logo.svg.png",
+    "url": "https://tv-trthaber.medya.trt.com.tr/master.m3u8"
+  },
+  {
+    "id": "ahaber",
+    "name": "A Haber",
+    "category": "Haber",
+    "logo": "https://upload.wikimedia.org/wikipedia/commons/7/7c/Ahaber_Logo.png",
+    "url": "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/ahaber/ahaber.m3u8"
+  },
+  {
+    "id": "halktv",
+    "name": "Halk TV",
+    "category": "Haber",
+    "logo": "https://i.imgur.com/xM0HA30.png",
+    "url": "https://halktv-live.daioncdn.net/halktv/halktv.m3u8"
+  },
+  {
+    "id": "haberturk",
+    "name": "Habertürk TV",
+    "category": "Haber",
+    "logo": "https://i.imgur.com/6Tw3rUp.png",
+    "url": "https://tv.ensonhaber.com/haberturk/haberturk.m3u8"
+  },
+  {
+    "id": "tele1",
+    "name": "Tele 1",
+    "category": "Haber",
+    "logo": "https://upload.wikimedia.org/wikipedia/tr/4/43/Tele1_logosu.png",
+    "url": "https://tele1-live.ercdn.net/tele1/tele1.m3u8"
+  },
+  {
+    "id": "tv24",
+    "name": "24 TV",
+    "category": "Haber",
+    "logo": "https://i.imgur.com/8FO41es.png",
+    "url": "https://turkmedya-live.ercdn.net/tv24/tv24.m3u8"
+  },
+  {
+    "id": "bloomberght",
+    "name": "Bloomberg HT",
+    "category": "Haber",
+    "logo": "https://i.imgur.com/bmkXfIE.png",
+    "url": "https://ciner-live.daioncdn.net/bloomberght/bloomberght.m3u8"
+  },
+  {
+    "id": "trtspor",
+    "name": "TRT Spor",
+    "category": "Spor",
+    "logo": "https://i.imgur.com/6tv0zxh.png",
+    "url": "https://corestream.siteyaptim.live/trt-spor/index.m3u8"
+  },
+  {
+    "id": "aspor",
+    "name": "A Spor",
+    "category": "Spor",
+    "logo": "https://i.imgur.com/ZhkZzLf.png",
+    "url": "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/aspor/aspor.m3u8"
+  },
+  {
+    "id": "tivibuspor",
+    "name": "Tivibu Spor",
+    "category": "Spor",
+    "logo": "https://assets.uzunmuhalefet.com/logos/3d0c0f6a-3deb-4bfa-a0f7-243827fed0ff.png",
+    "url": "https://trn03.tulix.tv/gt-tivibuspor1/playlist.m3u8"
+  },
+  {
+    "id": "ssport",
+    "name": "S Sport",
+    "category": "Spor",
+    "logo": "https://upload.wikimedia.org/wikipedia/commons/a/a9/S_Sport_logo1.png",
+    "url": "https://corestream.siteyaptim.live/s-sport/index.m3u8"
+  },
+  {
+    "id": "ssport2",
+    "name": "S Sport 2",
+    "category": "Spor",
+    "logo": "https://i.imgur.com/2jIItAy.png",
+    "url": "https://corestream.siteyaptim.live/s-sport2/index.m3u8"
+  },
+  {
+    "id": "fbtv",
+    "name": "FB TV",
+    "category": "Spor",
+    "logo": "https://i.imgur.com/qBVqtYd.png",
+    "url": "http://1hskrdto.rocketcdn.com/fenerbahcetv.smil/playlist.m3u8"
+  },
+  {
+    "id": "canlimac1",
+    "name": "Canlı Maç 1 (Bein 1)",
+    "category": "Spor",
+    "logo": "https://raw.githubusercontent.com/KILBERBER/kilberber/refs/heads/main/0.birazspor.png",
+    "url": "https://api.codetabs.com/v1/proxy/?quest=https://andro.226503.xyz/checklist/androstreamlivebiraz1.m3u8"
+  },
+  {
+    "id": "canlimac2",
+    "name": "Canlı Maç 2 (Bein 1 B)",
+    "category": "Spor",
+    "logo": "https://raw.githubusercontent.com/KILBERBER/kilberber/refs/heads/main/0.bosss.png",
+    "url": "https://api.codetabs.com/v1/proxy/?quest=https://andro.2385437.xyz/checklist/receptestt.m3u8"
+  },
+  {
+    "id": "powerturktv",
+    "name": "PowerTürk TV",
+    "category": "Müzik",
+    "logo": "https://i.imgur.com/9OPoXQG.png",
+    "url": "https://live.artidijitalmedya.com/artidijital_powerturktv/powerturktv/playlist.m3u8"
+  },
+  {
+    "id": "kralpoptv",
+    "name": "Kral Pop TV",
+    "category": "Müzik",
+    "logo": "https://i.imgur.com/ch365lh.png",
+    "url": "https://dogus-live.daioncdn.net/kralpoptv/playlist.m3u8"
+  },
+  {
+    "id": "dreamturk",
+    "name": "Dream Türk",
+    "category": "Müzik",
+    "logo": "https://i.imgur.com/vJ8VaZi.png",
+    "url": "https://live.duhnet.tv/S2/HLS_LIVE/dreamturknp/playlist.m3u8"
+  },
+  {
+    "id": "trtcocuk",
+    "name": "TRT Çocuk",
+    "category": "Çocuk",
+    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/TRT_%C3%87ocuk_logo_%282021%29.svg/960px-TRT_%C3%87ocuk_logo_%282021%29.svg.png",
+    "url": "https://tv-trtcocuk.medya.trt.com.tr/master.m3u8"
+  },
+  {
+    "id": "minikacocuk",
+    "name": "Minika Çocuk",
+    "category": "Çocuk",
+    "logo": "https://i.imgur.com/VCywMTv.png",
+    "url": "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/minikago_cocuk/minikago_cocuk.m3u8"
+  },
+  {
+    "id": "trtbelgesel",
+    "name": "TRT Belgesel",
+    "category": "Belgesel",
+    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/TRT_Belgesel_logo_%282019-%29.svg/960px-TRT_Belgesel_logo_%282019-%29.svg.png",
+    "url": "http://hls127.freeott.top:8080/TRT_BELGESEL_TR/video.m3u8"
+  },
+  {
+    "id": "kocaelitv",
+    "name": "Kocaeli TV",
+    "category": "Yerel",
+    "logo": "https://i.imgur.com/LeTP4zq.png",
+    "url": "https://edge.taksimbilisim.com/kocaelitv/bant1/playlist.m3u8"
+  },
+  {
+    "id": "caytv",
+    "name": "Çay TV (Rize)",
+    "category": "Yerel",
+    "logo": "https://i.imgur.com/ndupxwu.png",
+    "url": "https://edge1.socialsmart.tv/caytv/bant1/playlist.m3u8"
+  },
+  {
+    "id": "kanal23",
+    "name": "Kanal 23 (Elazığ)",
+    "category": "Yerel",
+    "logo": "https://i.imgur.com/3br8RCq.png",
+    "url": "https://cdn-kanal23.yayin.com.tr/kanal23/index.m3u8"
+  },
+  {
+    "id": "tv52",
+    "name": "TV 52 (Ordu)",
+    "category": "Yerel",
+    "logo": "https://i.imgur.com/k4R5CzO.png",
+    "url": "https://edge1.socialsmart.tv/tv52/bant1/playlist.m3u8"
+  },
+  {
+    "id": "aksutv",
+    "name": "Aksu TV (Kahramanmaraş)",
+    "category": "Yerel",
+    "logo": "https://i.imgur.com/mgDCKiy.png",
+    "url": "https://live.artidijitalmedya.com/artidijital_aksutv/aksutv/playlist.m3u8"
+  }
+]

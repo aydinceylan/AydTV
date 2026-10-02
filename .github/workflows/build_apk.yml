@@ -1,0 +1,40 @@
+name: AydTV APK Bulut Derleyici
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: AydTV Android APK Derleme
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Kodu Getir
+        uses: actions/checkout@v4
+
+      - name: Java (JDK 17) Kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Flutter Ortamını Hazırla
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Bağımlılıkları Yükle
+        run: flutter pub get
+
+      - name: Release APK Derle
+        run: flutter build apk --release
+
+      - name: Derlenen APK'yı İndirilebilir Yap
+        uses: actions/upload-artifact@v4
+        with:
+          name: AydTV-ArçelikTV-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
