@@ -253,16 +253,17 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     }
 
     final targetUrl = allUrls[urlIndex];
+    VideoPlayerController? newController;
 
     try {
       final uri = Uri.parse(targetUrl);
-      final newController = VideoPlayerController.networkUrl(
+      newController = VideoPlayerController.networkUrl(
         uri,
         httpHeaders: channel.headers ?? {},
       );
 
-      // Yavaş veya takılan yayınları engellemek için 4 saniye zaman aşımı
-      await newController.initialize().timeout(const Duration(seconds: 4));
+      // Yayının sağlıklı başlatılması için doğal akışa bırakıyoruz (4s kısıtı kaldırıldı)
+      await newController.initialize();
 
       // Kanal initialize olurken arkada yeni bir kanal seçildiyse bunu iptal et
       if (thisRequestId != _playRequestId) {
@@ -281,6 +282,9 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
         });
       }
     } catch (e) {
+      // Hata veya iptal anında donanım MediaCodec kaynağını kesinlikle serbest bırak!
+      await newController?.dispose();
+
       if (thisRequestId != _playRequestId) return;
 
       // Birincil link başarısız olduysa sıradaki yedeği dene
@@ -291,7 +295,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
           setState(() {
             _isLoading = false;
             _hasError = true;
-            _errorMessage = 'Yayın başlatılamadı. Link geçici olarak çevrimdışı olabilir.';
+            _errorMessage = 'Yayın geçici olarak kullanılamıyor.';
           });
         }
       }
@@ -608,20 +612,18 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
                         Text('Yayın Hatası', style: TVTheme.tvTitle.copyWith(color: Colors.redAccent)),
                         const SizedBox(height: 6),
                         Text(_errorMessage, style: TVTheme.tvCategory),
-                        const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: TVTheme.focusCyan,
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                        const SizedBox(height: 14),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: TVTheme.liquidCardBg,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.white24, width: 0.8),
                           ),
-                          onPressed: () {
-                            if (_currentChannel != null) {
-                              _playChannel(_currentChannel!, _currentChannelIndex);
-                            }
-                          },
-                          icon: const Icon(Icons.refresh_rounded),
-                          label: const Text('Tekrar Dene', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                          child: const Text(
+                            'Kanal değiştirmek için  ▲ ▼  |  Kanal Listesi için  OK',
+                            style: TextStyle(color: TVTheme.textSecondary, fontSize: 13),
+                          ),
                         ),
                       ],
                     ),
