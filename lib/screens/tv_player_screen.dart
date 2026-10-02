@@ -46,6 +46,13 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
   String _numberInputBuffer = '';
   Timer? _numberInputTimer;
 
+  // Otomatik Donma (Freeze / Stall) Dedektörü
+  Timer? _freezeCheckTimer;
+  Duration? _lastPosition;
+  int _stuckCounter = 0;
+  bool _isAutoReconnecting = false;
+  int _consecutiveStalls = 0;
+
   final FocusNode _screenFocusNode = FocusNode();
 
   @override
@@ -53,10 +60,12 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     super.initState();
     _initializeChannels();
     _checkAppUpdates();
+    _startFreezeDetector();
   }
 
   @override
   void dispose() {
+    _freezeCheckTimer?.cancel();
     _zappingBarTimer?.cancel();
     _zappingDebounceTimer?.cancel();
     _numberInputTimer?.cancel();
@@ -229,6 +238,8 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
 
       _channelService.saveLastChannelId(channel.id);
       _triggerZappingBar();
+      _stuckCounter = 0;
+      _lastPosition = null;
 
       final oldController = _controller;
       _controller = null;
@@ -280,6 +291,8 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
           _playingChannelId = channel.id; // Oynatma başarıyla sağlandı!
           _isLoading = false;
         });
+        _stuckCounter = 0;
+        _lastPosition = null;
       }
     } catch (e) {
       // Hata veya iptal anında donanım MediaCodec kaynağını kesinlikle serbest bırak!
@@ -300,6 +313,74 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
         }
       }
     }
+  }
+
+  /// Canlı Yayın Donma (Stall / Freeze) Dedektörü
+  /// Ağ dalgalanmaları veya HLS manifest tıkanmalarında yayının donmasını 3-4 saniyede
+  /// tespit eder ve kullanıcı kumandaya dokunmadan canlı uca (live edge) otomatik yeniden bağlanır.
+  void _startFreezeDetector() {
+    _freezeCheckTimer?.cancel();
+    _stuckCounter = 0;
+    _lastPosition = null;
+
+    _freezeCheckTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted ||
+          _isAutoReconnecting ||
+          _isLoading ||
+          _hasError ||
+          _controller == null ||
+          _isDrawerOpen) {
+        return;
+      }
+
+      final val = _controller!.value;
+      if (!val.isInitialized) return;
+
+      // HLS canlı yayınında takılma / donma tespiti:
+      // 1) ExoPlayer uzun süre buffer bekliyor (isBuffering = true)
+      // 2) Veya oynatılıyor görünüyor ama position ilerlemiyor (ekran dondu)
+      final isFrozen = (val.isPlaying && _lastPosition != null && val.position == _lastPosition);
+      final isBufferingStuck = val.isBuffering;
+
+      if (isFrozen || isBufferingStuck) {
+        _stuckCounter++;
+        // 4 saniye boyunca donuk kaldıysa otomatik canlı uca yeniden bağlan
+        if (_stuckCounter >= 4) {
+          _stuckCounter = 0;
+          _recoverStalledPlayback();
+        }
+      } else {
+        // Yayın akmaya devam ediyorsa sayaçları sıfırla
+        _stuckCounter = 0;
+        _consecutiveStalls = 0;
+      }
+
+      _lastPosition = val.position;
+    });
+  }
+
+  /// Donan yayını kullanıcı kanal değiştirip geri gelmiş gibi canlı uçtan (live-edge) tazeler
+  Future<void> _recoverStalledPlayback() async {
+    if (_currentChannel == null || _isAutoReconnecting || !mounted) return;
+
+    _isAutoReconnecting = true;
+    _consecutiveStalls++;
+
+    _showToast('🔄 Yayın yenileniyor, canlıya bağlanılıyor...');
+
+    final ch = _currentChannel!;
+    final idx = _currentChannelIndex;
+
+    // Aynı hat üst üste 2 kez donarsa ve yedek link varsa sıradaki yedeğe geç
+    int targetUrlIndex = 0;
+    if (_consecutiveStalls >= 2 && ch.backupUrls.isNotEmpty) {
+      targetUrlIndex = (_consecutiveStalls - 1) % (ch.backupUrls.length + 1);
+    }
+
+    _playingChannelId = null; // Mevcut controller kilidini aç
+    await _playChannel(ch, idx, urlIndex: targetUrlIndex, requestId: ++_playRequestId);
+
+    _isAutoReconnecting = false;
   }
 
   void _triggerZappingBar() {
