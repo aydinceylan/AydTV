@@ -8,7 +8,7 @@ class ChannelCard extends StatefulWidget {
   final Channel channel;
   final int index;
   final bool isPlaying;
-  final bool isInitiallyFocused;
+  final FocusNode? focusNode;
   final VoidCallback onSelect;
   final VoidCallback onToggleFavorite;
   final ValueChanged<bool>? onFocusChanged;
@@ -20,7 +20,7 @@ class ChannelCard extends StatefulWidget {
     required this.channel,
     required this.index,
     required this.isPlaying,
-    this.isInitiallyFocused = false,
+    this.focusNode,
     required this.onSelect,
     required this.onToggleFavorite,
     this.onFocusChanged,
@@ -38,19 +38,27 @@ class _ChannelCardState extends State<ChannelCard> {
   @override
   Widget build(BuildContext context) {
     return Focus(
-      autofocus: widget.isInitiallyFocused,
+      focusNode: widget.focusNode,
       onFocusChange: (focused) {
         setState(() {
           _isFocused = focused;
         });
-        widget.onFocusChanged?.call(focused);
+        if (focused) {
+          widget.onFocusChanged?.call(true);
+          Scrollable.ensureVisible(
+            context,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOutCubic,
+          );
+        }
       },
       onKeyEvent: (node, event) {
         if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
         final key = event.logicalKey;
 
-        // Kumanda OK Tuşuna Basıldığında Kanalı Aç
+        // Kumanda OK Tuşuna Basıldığında Kanalı Aç / Kapat
         if (key == LogicalKeyboardKey.select ||
             key == LogicalKeyboardKey.enter ||
             key == LogicalKeyboardKey.space ||
@@ -144,7 +152,7 @@ class _ChannelCardState extends State<ChannelCard> {
 
                 const SizedBox(width: 8),
 
-                // Kanal Adı + Mini EPG Yayın Bilgisi (İlerleme çubuğu kaldırıldı)
+                // Kanal Adı + Mini EPG Yayın Bilgisi
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

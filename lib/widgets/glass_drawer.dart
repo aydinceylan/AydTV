@@ -30,25 +30,53 @@ class _GlassDrawerState extends State<GlassDrawer> {
   Channel? _focusedChannel;
   late ScrollController _scrollController;
   final FocusNode _emptyFocusNode = FocusNode();
+  List<FocusNode> _channelFocusNodes = [];
 
   @override
   void initState() {
     super.initState();
     _focusedChannel = widget.currentChannel;
+    _updateFocusNodes();
 
-    // Eğer o anki kanal geçerli bir kategorideyse oradan başla
     final channels = _filteredChannels;
     int initialIdx = -1;
     if (widget.currentChannel != null) {
       initialIdx = channels.indexWhere((c) => c.id == widget.currentChannel!.id);
     }
+    if (initialIdx == -1 && channels.isNotEmpty) {
+      initialIdx = 0;
+    }
 
     final double initialOffset = (initialIdx > 2) ? (initialIdx - 1) * 58.0 : 0.0;
     _scrollController = ScrollController(initialScrollOffset: initialOffset);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (channels.isEmpty) {
+        _emptyFocusNode.requestFocus();
+      } else if (initialIdx >= 0 && initialIdx < _channelFocusNodes.length) {
+        _channelFocusNodes[initialIdx].requestFocus();
+        _focusedChannel = channels[initialIdx];
+      }
+    });
+  }
+
+  void _updateFocusNodes() {
+    for (var node in _channelFocusNodes) {
+      node.dispose();
+    }
+    final count = _filteredChannels.length;
+    _channelFocusNodes = List.generate(
+      count,
+      (index) => FocusNode(debugLabel: 'ChannelNode_$index'),
+    );
   }
 
   @override
   void dispose() {
+    for (var node in _channelFocusNodes) {
+      node.dispose();
+    }
     _scrollController.dispose();
     _emptyFocusNode.dispose();
     super.dispose();
@@ -57,8 +85,8 @@ class _GlassDrawerState extends State<GlassDrawer> {
   List<String> get _categories {
     final Set<String> cats = {'Tümü', '⭐ Favoriler'};
     for (var ch in widget.channels) {
-      if (ch.category.isNotEmpty) {
-        cats.add(ch.category);
+      if (ch.category.trim().isNotEmpty) {
+        cats.add(ch.category.trim());
       }
     }
     return cats.toList();
@@ -72,24 +100,46 @@ class _GlassDrawerState extends State<GlassDrawer> {
       return widget.channels;
     }
     return widget.channels
-        .where((ch) => ch.category.toLowerCase() == _selectedCategory.toLowerCase())
+        .where((ch) => ch.category.trim().toLowerCase() == _selectedCategory.trim().toLowerCase())
         .toList();
   }
 
   void _switchCategory(int direction) {
     final cats = _categories;
     int currentIdx = cats.indexOf(_selectedCategory);
+    if (currentIdx == -1) currentIdx = 0;
     int nextIdx = (currentIdx + direction + cats.length) % cats.length;
+
     setState(() {
       _selectedCategory = cats[nextIdx];
+      _updateFocusNodes();
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (_filteredChannels.isEmpty) {
+      final channels = _filteredChannels;
+      if (channels.isEmpty) {
         _emptyFocusNode.requestFocus();
+      } else {
+        if (_channelFocusNodes.isNotEmpty) {
+          _channelFocusNodes[0].requestFocus();
+          _focusedChannel = channels[0];
+        }
+        if (_scrollController.hasClients) {
+          _scrollController.jumpTo(0);
+        }
       }
     });
+  }
+
+  void _handleChannelSelect(Channel ch) {
+    if (widget.currentChannel?.id == ch.id) {
+      // Zaten açık olan kanalda OK yapıldıysa menüyü kapat, tam ekrana geç
+      widget.onClose();
+    } else {
+      // Başka bir kanala tıklandıysa kanalı aç ve arka planda oynat
+      widget.onChannelSelect(ch);
+    }
   }
 
   bool _isRedKey(KeyEvent event) {
@@ -120,13 +170,14 @@ class _GlassDrawerState extends State<GlassDrawer> {
         }
       },
       child: Focus(
-        autofocus: true,
+        canRequestFocus: false,
+        skipTraversal: true,
         onKeyEvent: (node, event) {
           if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
           final key = event.logicalKey;
 
-          // Geri Tuşu: Kesinlikle uygulamayı kapatmaz, menüyü kapatır
+          // Geri Tuşu: Menüyü kapatır
           if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
             widget.onClose();
             return KeyEventResult.handled;
@@ -142,7 +193,7 @@ class _GlassDrawerState extends State<GlassDrawer> {
             }
           }
 
-          // Boş kategorideyken dahi sağ/sol ile kategorileri gezin
+          // Kategori Değiştirme (Sol / Sağ)
           if (key == LogicalKeyboardKey.arrowLeft) {
             _switchCategory(-1);
             return KeyEventResult.handled;
@@ -255,6 +306,15 @@ class _GlassDrawerState extends State<GlassDrawer> {
                               onTap: () {
                                 setState(() {
                                   _selectedCategory = cat;
+                                  _updateFocusNodes();
+                                });
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  if (!mounted) return;
+                                  if (_filteredChannels.isEmpty) {
+                                    _emptyFocusNode.requestFocus();
+                                  } else if (_channelFocusNodes.isNotEmpty) {
+                                    _channelFocusNodes[0].requestFocus();
+                                  }
                                 });
                               },
                               child: AnimatedContainer(
@@ -294,7 +354,6 @@ class _GlassDrawerState extends State<GlassDrawer> {
                         child: channels.isEmpty
                             ? Focus(
                                 focusNode: _emptyFocusNode,
-                                autofocus: true,
                                 onKeyEvent: (node, event) {
                                   if (event is! KeyDownEvent) return KeyEventResult.ignored;
                                   if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
@@ -303,6 +362,11 @@ class _GlassDrawerState extends State<GlassDrawer> {
                                   }
                                   if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
                                     _switchCategory(1);
+                                    return KeyEventResult.handled;
+                                  }
+                                  if (event.logicalKey == LogicalKeyboardKey.escape ||
+                                      event.logicalKey == LogicalKeyboardKey.goBack) {
+                                    widget.onClose();
                                     return KeyEventResult.handled;
                                   }
                                   return KeyEventResult.ignored;
@@ -349,22 +413,17 @@ class _GlassDrawerState extends State<GlassDrawer> {
                                 itemBuilder: (context, index) {
                                   final ch = channels[index];
                                   final isPlaying = widget.currentChannel?.id == ch.id;
-
-                                  // Başlangıçta oynayan kanal varsa ona fokuslan, yoksa index 0
-                                  final isInitiallyFocused = (widget.currentChannel != null)
-                                      ? (widget.currentChannel!.id == ch.id)
-                                      : (index == 0);
+                                  final fNode = (index < _channelFocusNodes.length)
+                                      ? _channelFocusNodes[index]
+                                      : null;
 
                                   return ChannelCard(
-                                    key: ValueKey(ch.id),
+                                    key: ValueKey('${ch.id}_${_selectedCategory}_$index'),
                                     channel: ch,
                                     index: index,
                                     isPlaying: isPlaying,
-                                    isInitiallyFocused: isInitiallyFocused,
-                                    onSelect: () {
-                                      widget.onChannelSelect(ch);
-                                      widget.onClose();
-                                    },
+                                    focusNode: fNode,
+                                    onSelect: () => _handleChannelSelect(ch),
                                     onToggleFavorite: () {
                                       widget.onToggleFavorite(ch);
                                       setState(() {});
@@ -389,11 +448,11 @@ class _GlassDrawerState extends State<GlassDrawer> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              'OK: İzle • ◀ ▶: Kategori • 🔴: Favori',
+                              'OK: İzle/Kapat • ◀ ▶: Kategori • 🔴: Favori',
                               style: TextStyle(color: TVTheme.textSecondary, fontSize: 10),
                             ),
                             Text(
-                              'v1.0.3',
+                              'v1.0.4',
                               style: TextStyle(color: Colors.white24, fontSize: 10),
                             ),
                           ],

@@ -25,11 +25,16 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
   List<Channel> _channels = [];
   Channel? _currentChannel;
   int _currentChannelIndex = 0;
+  int _targetChannelIndex = 0;
 
   VideoPlayerController? _controller;
   bool _isLoading = true;
   bool _hasError = false;
   String _errorMessage = '';
+
+  // Eşzamanlılık / Yarış Durumu (Race Condition) Önleyici İstek Kimliği
+  int _playRequestId = 0;
+  Timer? _zappingDebounceTimer;
 
   bool _isDrawerOpen = false;
   DateTime? _lastDrawerClosedAt;
@@ -52,6 +57,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
   @override
   void dispose() {
     _zappingBarTimer?.cancel();
+    _zappingDebounceTimer?.cancel();
     _numberInputTimer?.cancel();
     _controller?.dispose();
     _screenFocusNode.dispose();
@@ -72,6 +78,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
         if (found != -1) startIndex = found;
       }
 
+      _targetChannelIndex = startIndex;
       _playChannel(channels[startIndex], startIndex);
 
       // TV+ Gerçek Zamanlı EPG Bilgisini Arka Planda Çek
@@ -89,7 +96,6 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       setState(() {
         _channels = updatedChannels;
       });
-      // Arka planda sessiz güncelleme - kullanıcıya rahatsız edici toast gösterilmez
       _epgService.syncAllEpg(_channels, () {
         if (mounted) setState(() {});
       });
@@ -197,12 +203,18 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     );
   }
 
-  /// Çoklu Kaynak Yedekleme (Failover): Birincil yayın hata verirse yedek yayınları dener
-  Future<void> _playChannel(Channel channel, int index, {int urlIndex = 0}) async {
+  /// Çoklu Kaynak ve Yarış Durumu Korumalı Oynatıcı
+  Future<void> _playChannel(Channel channel, int index, {int urlIndex = 0, int? requestId}) async {
     final allUrls = [channel.url, ...channel.backupUrls];
+    final thisRequestId = requestId ?? ++_playRequestId;
 
     if (urlIndex == 0) {
-      if (_currentChannel?.id == channel.id && _controller != null && _controller!.value.isPlaying) {
+      _targetChannelIndex = index;
+
+      if (_controller != null &&
+          _controller!.value.isInitialized &&
+          _controller!.value.isPlaying &&
+          _currentChannel?.id == channel.id) {
         return;
       }
 
@@ -219,10 +231,15 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       final oldController = _controller;
       _controller = null;
       await oldController?.dispose();
+
+      // Eski istekse hemen durdur
+      if (thisRequestId != _playRequestId) {
+        return;
+      }
     }
 
     if (urlIndex >= allUrls.length) {
-      if (mounted) {
+      if (mounted && thisRequestId == _playRequestId) {
         setState(() {
           _isLoading = false;
           _hasError = true;
@@ -242,21 +259,30 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       );
 
       await newController.initialize();
+
+      // Kanal initialize olurken arkada yeni bir kanala tıklandıysa eski isteği çöpe at
+      if (thisRequestId != _playRequestId) {
+        await newController.dispose();
+        return;
+      }
+
       await newController.play();
       newController.setLooping(true);
 
-      if (mounted) {
+      if (mounted && thisRequestId == _playRequestId) {
         setState(() {
           _controller = newController;
           _isLoading = false;
         });
       }
     } catch (e) {
+      if (thisRequestId != _playRequestId) return;
+
       // Birincil link başarısız olduysa sıradaki yedeği dene
       if (urlIndex + 1 < allUrls.length) {
-        await _playChannel(channel, index, urlIndex: urlIndex + 1);
+        await _playChannel(channel, index, urlIndex: urlIndex + 1, requestId: thisRequestId);
       } else {
-        if (mounted) {
+        if (mounted && thisRequestId == _playRequestId) {
           setState(() {
             _isLoading = false;
             _hasError = true;
@@ -281,20 +307,32 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     });
   }
 
-  void _nextChannel() {
+  /// Hızlı kanal atlamalarında (Up/Down) HUD anında güncellenir, stream 350ms durulunca bağlanır
+  void _onChannelStep(int delta) {
     if (_channels.isEmpty) return;
-    int next = (_currentChannelIndex + 1) % _channels.length;
-    _playChannel(_channels[next], next);
-  }
+    _targetChannelIndex = (_targetChannelIndex + delta + _channels.length) % _channels.length;
+    final targetChannel = _channels[_targetChannelIndex];
 
-  void _prevChannel() {
-    if (_channels.isEmpty) return;
-    int prev = (_currentChannelIndex - 1 + _channels.length) % _channels.length;
-    _playChannel(_channels[prev], prev);
+    // HUD ve kanal bilgisini ANINDA göster (0 gecikme!)
+    setState(() {
+      _currentChannel = targetChannel;
+      _currentChannelIndex = _targetChannelIndex;
+      _showZappingBar = true;
+    });
+    _triggerZappingBar();
+
+    // Hızlı basıldığında eski istekleri iptal et, 350ms bekleyip hedef kanalı aç
+    _zappingDebounceTimer?.cancel();
+    _zappingDebounceTimer = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) {
+        _playChannel(targetChannel, _targetChannelIndex);
+      }
+    });
   }
 
   void _handleNumberInput(String digit) {
     _numberInputTimer?.cancel();
+    _zappingDebounceTimer?.cancel();
     setState(() {
       if (_numberInputBuffer.length < 3) {
         _numberInputBuffer += digit;
@@ -392,16 +430,16 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       });
       return KeyEventResult.handled;
     } else if (key == LogicalKeyboardKey.arrowDown || key == LogicalKeyboardKey.channelDown) {
-      _nextChannel();
+      _onChannelStep(1); // Aşağı tuş = sonraki kanal (TV mantığı)
       return KeyEventResult.handled;
     } else if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.channelUp) {
-      _prevChannel();
+      _onChannelStep(-1); // Yukarı tuş = önceki kanal
       return KeyEventResult.handled;
     } else if (key == LogicalKeyboardKey.arrowRight) {
-      _nextChannel();
+      _onChannelStep(1);
       return KeyEventResult.handled;
     } else if (key == LogicalKeyboardKey.arrowLeft) {
-      _prevChannel();
+      _onChannelStep(-1);
       return KeyEventResult.handled;
     } else if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
       _showExitDialog();
@@ -592,6 +630,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
                   channels: _channels,
                   currentChannel: _currentChannel,
                   onChannelSelect: (ch) {
+                    _zappingDebounceTimer?.cancel();
                     final idx = _channels.indexWhere((c) => c.id == ch.id);
                     _playChannel(ch, idx != -1 ? idx : 0);
                   },
