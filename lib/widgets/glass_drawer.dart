@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/channel.dart';
 import '../theme/tv_theme.dart';
 import 'channel_card.dart';
@@ -49,25 +50,53 @@ class _GlassDrawerState extends State<GlassDrawer> {
         .toList();
   }
 
+  void _nextCategory() {
+    final cats = _categories;
+    int currentIdx = cats.indexOf(_selectedCategory);
+    int nextIdx = (currentIdx + 1) % cats.length;
+    setState(() {
+      _selectedCategory = cats[nextIdx];
+    });
+  }
+
+  void _prevCategory() {
+    final cats = _categories;
+    int currentIdx = cats.indexOf(_selectedCategory);
+    int prevIdx = (currentIdx - 1 + cats.length) % cats.length;
+    setState(() {
+      _selectedCategory = cats[prevIdx];
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final drawerWidth = screenWidth * 0.42 > 460 ? 460.0 : screenWidth * 0.42;
+    const double drawerWidth = 360.0;
 
-    return Stack(
+    return Focus(
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.escape ||
+              event.logicalKey == LogicalKeyboardKey.goBack) {
+            widget.onClose();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Stack(
       children: [
-        // Arka Plan Cam Bulanıklığı (Yayın Arkada Akmaya Devam Eder)
+        // Arka Plan Cam Bulanıklığı (Hafifletilmiş 7px Gauss Bulanıklığı)
         GestureDetector(
           onTap: widget.onClose,
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            filter: ImageFilter.blur(sigmaX: 7.0, sigmaY: 7.0),
             child: Container(
-              color: Colors.black.withValues(alpha: 0.45),
+              color: Colors.black.withValues(alpha: 0.30),
             ),
           ),
         ),
 
-        // Sol Cam Menü Paneli
+        // Sol Cam Menü Paneli (360px İnce Şık TV Kenarlığı)
         Align(
           alignment: Alignment.centerLeft,
           child: Container(
@@ -77,22 +106,22 @@ class _GlassDrawerState extends State<GlassDrawer> {
               gradient: LinearGradient(
                 colors: [
                   TVTheme.surfaceGlass,
-                  const Color(0xF00D1117),
+                  const Color(0xF2090C10),
                 ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               border: Border(
                 right: BorderSide(
-                  color: Colors.white.withValues(alpha: 0.12),
-                  width: 1,
+                  color: TVTheme.focusCyan.withValues(alpha: 0.25),
+                  width: 1.5,
                 ),
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  blurRadius: 30,
-                  spreadRadius: 10,
+                  color: Colors.black.withValues(alpha: 0.7),
+                  blurRadius: 24,
+                  spreadRadius: 4,
                 ),
               ],
             ),
@@ -102,33 +131,33 @@ class _GlassDrawerState extends State<GlassDrawer> {
                 children: [
                   // Başlık Alanı
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
                                 gradient: const LinearGradient(
                                   colors: [TVTheme.focusCyan, TVTheme.focusBlue],
                                 ),
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(6),
                               ),
                               child: const Text(
                                 'AydTV',
                                 style: TextStyle(
                                   color: Colors.black,
                                   fontWeight: FontWeight.w900,
-                                  fontSize: 20,
+                                  fontSize: 16,
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Kanal Listesi',
-                              style: TVTheme.tvTitle.copyWith(fontSize: 22),
+                            const SizedBox(width: 10),
+                            const Text(
+                              'Kanallar',
+                              style: TVTheme.tvTitle,
                             ),
                           ],
                         ),
@@ -140,53 +169,44 @@ class _GlassDrawerState extends State<GlassDrawer> {
                     ),
                   ),
 
-                  // Kategori Hapları (D-Pad ile Sağ/Sol Gezinilebilir)
+                  // Kategori Hapları
                   SizedBox(
-                    height: 48,
+                    height: 40,
                     child: ListView.builder(
                       scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
                       itemCount: _categories.length,
                       itemBuilder: (context, idx) {
                         final cat = _categories[idx];
                         final isSelected = cat == _selectedCategory;
 
-                        return Focus(
-                          onFocusChange: (focused) {
-                            if (focused) {
-                              setState(() {
-                                _selectedCategory = cat;
-                              });
-                            }
+                        return GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _selectedCategory = cat;
+                            });
                           },
-                          child: GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _selectedCategory = cat;
-                              });
-                            },
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 180),
-                              margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? TVTheme.focusCyan.withValues(alpha: 0.2)
-                                    : Colors.white.withValues(alpha: 0.05),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: isSelected ? TVTheme.focusCyan : Colors.transparent,
-                                  width: 1.5,
-                                ),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 140),
+                            margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? TVTheme.focusCyan.withValues(alpha: 0.22)
+                                  : Colors.white.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isSelected ? TVTheme.focusCyan : Colors.transparent,
+                                width: 1.2,
                               ),
-                              child: Center(
-                                child: Text(
-                                  cat,
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                    color: isSelected ? TVTheme.focusCyan : TVTheme.textPrimary,
-                                  ),
+                            ),
+                            child: Center(
+                              child: Text(
+                                cat,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                  color: isSelected ? TVTheme.focusCyan : TVTheme.textPrimary,
                                 ),
                               ),
                             ),
@@ -196,7 +216,7 @@ class _GlassDrawerState extends State<GlassDrawer> {
                     ),
                   ),
 
-                  const Divider(color: Colors.white12, height: 20),
+                  const Divider(color: Colors.white12, height: 14),
 
                   // Kanal Listesi
                   Expanded(
@@ -204,11 +224,11 @@ class _GlassDrawerState extends State<GlassDrawer> {
                         ? const Center(
                             child: Text(
                               'Bu kategoride kanal bulunamadı.',
-                              style: TextStyle(color: TVTheme.textSecondary, fontSize: 16),
+                              style: TextStyle(color: TVTheme.textSecondary, fontSize: 14),
                             ),
                           )
                         : ListView.builder(
-                            padding: const EdgeInsets.only(bottom: 24),
+                            padding: const EdgeInsets.only(bottom: 16),
                             itemCount: _filteredChannels.length,
                             itemBuilder: (context, index) {
                               final ch = _filteredChannels[index];
@@ -224,10 +244,11 @@ class _GlassDrawerState extends State<GlassDrawer> {
                                   widget.onClose();
                                 },
                                 onToggleFavorite: () {
-                                  setState(() {
-                                    widget.onToggleFavorite(ch);
-                                  });
+                                  widget.onToggleFavorite(ch);
+                                  setState(() {});
                                 },
+                                onPrevCategory: _prevCategory,
+                                onNextCategory: _nextCategory,
                               );
                             },
                           ),
@@ -235,18 +256,18 @@ class _GlassDrawerState extends State<GlassDrawer> {
 
                   // Alt Bilgilendirme
                   Container(
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 24),
-                    color: Colors.black.withValues(alpha: 0.4),
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                    color: Colors.black.withValues(alpha: 0.45),
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          '🎮 Kumanda: OK Seç • Geri Kapat',
-                          style: TextStyle(color: TVTheme.textSecondary, fontSize: 13),
+                          'OK: İzle • ◀ ▶: Kategori • 🔴: Favori',
+                          style: TextStyle(color: TVTheme.textSecondary, fontSize: 11),
                         ),
                         Text(
                           'v1.0.0',
-                          style: TextStyle(color: Colors.white24, fontSize: 12),
+                          style: TextStyle(color: Colors.white24, fontSize: 11),
                         ),
                       ],
                     ),
@@ -257,6 +278,7 @@ class _GlassDrawerState extends State<GlassDrawer> {
           ),
         ),
       ],
-    );
-  }
+    ),
+  );
+}
 }

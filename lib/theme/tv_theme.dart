@@ -46,28 +46,28 @@ class TVTheme {
     );
   }
 
-  // 10-Foot UI Tipografi (3-4 metre mesafeden net okunabilen boyutlar)
+  // 55" TV için dengeli ve rafine tipografi
   static const TextStyle tvTitle = TextStyle(
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: FontWeight.bold,
     color: textPrimary,
     letterSpacing: 0.5,
   );
 
   static const TextStyle tvChannelName = TextStyle(
-    fontSize: 22,
+    fontSize: 17,
     fontWeight: FontWeight.w600,
     color: textPrimary,
   );
 
   static const TextStyle tvCategory = TextStyle(
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: FontWeight.w500,
     color: textSecondary,
   );
 
   static const TextStyle tvBadge = TextStyle(
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: FontWeight.bold,
     color: Colors.white,
     letterSpacing: 0.5,
