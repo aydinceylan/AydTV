@@ -70,215 +70,271 @@ class _GlassDrawerState extends State<GlassDrawer> {
 
   @override
   Widget build(BuildContext context) {
-    const double drawerWidth = 360.0;
+    // 55" TV için zarif ve dar Liquid Glass genişliği (290px)
+    const double drawerWidth = 290.0;
 
     return Focus(
+      autofocus: true,
       onKeyEvent: (node, event) {
         if (event is KeyDownEvent) {
+          // Geri Tuşu: Kesinlikle uygulamayı kapatmaz, sadece menüyü kapatır!
           if (event.logicalKey == LogicalKeyboardKey.escape ||
               event.logicalKey == LogicalKeyboardKey.goBack) {
             widget.onClose();
+            return KeyEventResult.handled;
+          }
+          // Boş kategorideyken dahi sağ/sol ile kategorileri gezin
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            _prevCategory();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            _nextCategory();
             return KeyEventResult.handled;
           }
         }
         return KeyEventResult.ignored;
       },
       child: Stack(
-      children: [
-        // Arka Plan Cam Bulanıklığı (Hafifletilmiş 7px Gauss Bulanıklığı)
-        GestureDetector(
-          onTap: widget.onClose,
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 7.0, sigmaY: 7.0),
+        children: [
+          // Arka Plan Hafif Liquid Glass Bulanıklığı (Sadece 5px)
+          GestureDetector(
+            onTap: widget.onClose,
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.25),
+              ),
+            ),
+          ),
+
+          // Sol Liquid Glass Yan Panel
+          Align(
+            alignment: Alignment.centerLeft,
             child: Container(
-              color: Colors.black.withValues(alpha: 0.30),
-            ),
-          ),
-        ),
-
-        // Sol Cam Menü Paneli (360px İnce Şık TV Kenarlığı)
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Container(
-            width: drawerWidth,
-            height: double.infinity,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  TVTheme.surfaceGlass,
-                  const Color(0xF2090C10),
+              width: drawerWidth,
+              height: double.infinity,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [
+                    Color(0xB8070B12),
+                    Color(0xCC0B101B),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                border: Border(
+                  right: BorderSide(
+                    color: TVTheme.focusCyan.withValues(alpha: 0.3),
+                    width: 1.2,
+                  ),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    blurRadius: 20,
+                    spreadRadius: 2,
+                  ),
                 ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
               ),
-              border: Border(
-                right: BorderSide(
-                  color: TVTheme.focusCyan.withValues(alpha: 0.25),
-                  width: 1.5,
-                ),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.7),
-                  blurRadius: 24,
-                  spreadRadius: 4,
-                ),
-              ],
-            ),
-            child: SafeArea(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Başlık Alanı
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  colors: [TVTheme.focusCyan, TVTheme.focusBlue],
+              child: SafeArea(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Başlık & Logo
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [TVTheme.focusCyan, TVTheme.focusBlue],
+                                  ),
+                                  borderRadius: BorderRadius.circular(5),
                                 ),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                'AydTV',
-                                style: TextStyle(
-                                  color: Colors.black,
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 16,
+                                child: const Text(
+                                  'AydTV',
+                                  style: TextStyle(
+                                    color: Colors.black,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 14,
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 10),
-                            const Text(
-                              'Kanallar',
-                              style: TVTheme.tvTitle,
-                            ),
-                          ],
-                        ),
-                        Text(
-                          '${_filteredChannels.length} Kanal',
-                          style: TVTheme.tvCategory,
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Kategori Hapları
-                  SizedBox(
-                    height: 40,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      itemCount: _categories.length,
-                      itemBuilder: (context, idx) {
-                        final cat = _categories[idx];
-                        final isSelected = cat == _selectedCategory;
-
-                        return GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _selectedCategory = cat;
-                            });
-                          },
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 140),
-                            margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? TVTheme.focusCyan.withValues(alpha: 0.22)
-                                  : Colors.white.withValues(alpha: 0.05),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: isSelected ? TVTheme.focusCyan : Colors.transparent,
-                                width: 1.2,
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Kanallar',
+                                style: TVTheme.tvTitle,
                               ),
-                            ),
-                            child: Center(
-                              child: Text(
-                                cat,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                  color: isSelected ? TVTheme.focusCyan : TVTheme.textPrimary,
-                                ),
-                              ),
-                            ),
+                            ],
                           ),
-                        );
-                      },
+                          Text(
+                            '${_filteredChannels.length}',
+                            style: TVTheme.tvCategory.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
 
-                  const Divider(color: Colors.white12, height: 14),
+                    // Kategori Hapları
+                    SizedBox(
+                      height: 36,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        itemCount: _categories.length,
+                        itemBuilder: (context, idx) {
+                          final cat = _categories[idx];
+                          final isSelected = cat == _selectedCategory;
 
-                  // Kanal Listesi
-                  Expanded(
-                    child: _filteredChannels.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'Bu kategoride kanal bulunamadı.',
-                              style: TextStyle(color: TVTheme.textSecondary, fontSize: 14),
-                            ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.only(bottom: 16),
-                            itemCount: _filteredChannels.length,
-                            itemBuilder: (context, index) {
-                              final ch = _filteredChannels[index];
-                              final isPlaying = widget.currentChannel?.id == ch.id;
-
-                              return ChannelCard(
-                                key: ValueKey(ch.id),
-                                channel: ch,
-                                index: index,
-                                isPlaying: isPlaying,
-                                onSelect: () {
-                                  widget.onChannelSelect(ch);
-                                  widget.onClose();
-                                },
-                                onToggleFavorite: () {
-                                  widget.onToggleFavorite(ch);
-                                  setState(() {});
-                                },
-                                onPrevCategory: _prevCategory,
-                                onNextCategory: _nextCategory,
-                              );
+                          return GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _selectedCategory = cat;
+                              });
                             },
-                          ),
-                  ),
-
-                  // Alt Bilgilendirme
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                    color: Colors.black.withValues(alpha: 0.45),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'OK: İzle • ◀ ▶: Kategori • 🔴: Favori',
-                          style: TextStyle(color: TVTheme.textSecondary, fontSize: 11),
-                        ),
-                        Text(
-                          'v1.0.0',
-                          style: TextStyle(color: Colors.white24, fontSize: 11),
-                        ),
-                      ],
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 120),
+                              margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? TVTheme.focusCyan.withValues(alpha: 0.25)
+                                    : Colors.white.withValues(alpha: 0.04),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: isSelected ? TVTheme.focusCyan : Colors.transparent,
+                                  width: 1.0,
+                                ),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  cat,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                    color: isSelected ? TVTheme.focusCyan : TVTheme.textPrimary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
                     ),
-                  ),
-                ],
+
+                    const Divider(color: Colors.white10, height: 12),
+
+                    // Kanal Listesi veya Boş Durum
+                    Expanded(
+                      child: _filteredChannels.isEmpty
+                          ? Focus(
+                              autofocus: true,
+                              onKeyEvent: (node, event) {
+                                if (event is KeyDownEvent) {
+                                  if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                                    _prevCategory();
+                                    return KeyEventResult.handled;
+                                  }
+                                  if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                                    _nextCategory();
+                                    return KeyEventResult.handled;
+                                  }
+                                }
+                                return KeyEventResult.ignored;
+                              },
+                              child: Center(
+                                child: Container(
+                                  margin: const EdgeInsets.all(16),
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.05),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: Colors.white12),
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.star_outline_rounded,
+                                          color: TVTheme.favoriteGold, size: 36),
+                                      const SizedBox(height: 8),
+                                      const Text(
+                                        'Henüz Favori Eklenmedi',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      const Text(
+                                        'Kanallara Kırmızı tuşla favori ekleyebilirsiniz.\n◀ ▶ ile diğer kategorilere geçin.',
+                                        style: TextStyle(color: TVTheme.textSecondary, fontSize: 11),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            )
+                          : ListView.builder(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              itemCount: _filteredChannels.length,
+                              itemBuilder: (context, index) {
+                                final ch = _filteredChannels[index];
+                                final isPlaying = widget.currentChannel?.id == ch.id;
+
+                                return ChannelCard(
+                                  key: ValueKey(ch.id),
+                                  channel: ch,
+                                  index: index,
+                                  isPlaying: isPlaying,
+                                  onSelect: () {
+                                    widget.onChannelSelect(ch);
+                                    widget.onClose();
+                                  },
+                                  onToggleFavorite: () {
+                                    widget.onToggleFavorite(ch);
+                                    setState(() {});
+                                  },
+                                  onPrevCategory: _prevCategory,
+                                  onNextCategory: _nextCategory,
+                                );
+                              },
+                            ),
+                    ),
+
+                    // Alt İpucu Barı
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                      color: Colors.black.withValues(alpha: 0.4),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'OK: İzle • ◀ ▶: Kategori • 🔴: Favori',
+                            style: TextStyle(color: TVTheme.textSecondary, fontSize: 10),
+                          ),
+                          Text(
+                            'v1.0.2',
+                            style: TextStyle(color: Colors.white24, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
-}
+        ],
+      ),
+    );
+  }
 }

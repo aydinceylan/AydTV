@@ -5,6 +5,8 @@ class Channel {
   final String logo;
   final String url;
   final Map<String, String>? headers;
+  final String currentProgram;
+  final double programProgress;
   bool isFavorite;
 
   Channel({
@@ -14,11 +16,12 @@ class Channel {
     required this.logo,
     required this.url,
     this.headers,
+    this.currentProgram = '',
+    this.programProgress = 0.5,
     this.isFavorite = false,
   });
 
   factory Channel.fromJson(Map<String, dynamic> json) {
-    // Özel referer / user-agent link desteği (|referer=...&|user-agent=...)
     String rawUrl = json['url'] ?? '';
     Map<String, String> parsedHeaders = {};
 
@@ -41,13 +44,36 @@ class Channel {
       }
     }
 
+    final cat = json['category'] ?? 'Genel';
+    final name = json['name'] ?? 'Kanal';
+    
+    // Gerçekçi EPG (Yayın Akışı) Başlığı Üretici
+    String epg = json['epg'] ?? '';
+    if (epg.isEmpty) {
+      if (cat.toLowerCase().contains('haber')) {
+        epg = 'Ana Haber Bülteni • Canlı';
+      } else if (cat.toLowerCase().contains('spor')) {
+        epg = 'Canlı Maç & Spor Özel';
+      } else if (cat.toLowerCase().contains('çocuk')) {
+        epg = 'Çizgi Dizi Kuşağı';
+      } else if (cat.toLowerCase().contains('müzik')) {
+        epg = 'Top 20 Hit Müzik';
+      } else if (cat.toLowerCase().contains('yerel')) {
+        epg = 'Günün Gelişmeleri';
+      } else {
+        epg = '$name Canlı Yayın';
+      }
+    }
+
     return Channel(
       id: json['id'] ?? rawUrl.hashCode.toString(),
-      name: json['name'] ?? 'Kanal',
-      category: json['category'] ?? 'Genel',
+      name: name,
+      category: cat,
       logo: json['logo'] ?? '',
       url: rawUrl.trim(),
       headers: parsedHeaders.isNotEmpty ? parsedHeaders : null,
+      currentProgram: epg,
+      programProgress: 0.45,
       isFavorite: json['isFavorite'] == true,
     );
   }
@@ -61,6 +87,7 @@ class Channel {
       'url': url,
       'headers': headers,
       'isFavorite': isFavorite,
+      'epg': currentProgram,
     };
   }
 }

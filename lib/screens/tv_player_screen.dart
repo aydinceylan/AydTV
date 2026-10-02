@@ -96,14 +96,17 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message, style: const TextStyle(fontSize: 16)),
-        backgroundColor: TVTheme.surface.withValues(alpha: 0.95),
+        content: Text(
+          message,
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white),
+        ),
+        backgroundColor: const Color(0xE60D1422),
         duration: const Duration(seconds: 3),
         behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.only(bottom: 24, left: 40, right: 40),
+        margin: const EdgeInsets.only(bottom: 24, left: 60, right: 60),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: TVTheme.focusCyan, width: 1.5),
+          side: const BorderSide(color: TVTheme.focusCyan, width: 1.2),
         ),
       ),
     );
@@ -244,21 +247,18 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     });
   }
 
-  // TV Kuralı: Aşağı tuşu -> Sonraki Kanal (5 -> 6)
   void _nextChannel() {
     if (_channels.isEmpty) return;
     int next = (_currentChannelIndex + 1) % _channels.length;
     _playChannel(_channels[next], next);
   }
 
-  // TV Kuralı: Yukarı tuşu -> Önceki Kanal (5 -> 4)
   void _prevChannel() {
     if (_channels.isEmpty) return;
     int prev = (_currentChannelIndex - 1 + _channels.length) % _channels.length;
     _playChannel(_channels[prev], prev);
   }
 
-  // Sayı Tuşu (0-9) Yakalandığında
   void _handleNumberInput(String digit) {
     _numberInputTimer?.cancel();
     setState(() {
@@ -281,15 +281,28 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     });
   }
 
-  // Kırmızı Tuşla Favoriye Ekleme / Çıkarma
+  bool _isRedKey(KeyEvent event) {
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.f1 ||
+        key == LogicalKeyboardKey.gameButtonX ||
+        key.keyId == 183 ||
+        key.keyId == 0x002000000b7 ||
+        key.keyId == 0x00000000000000b7) {
+      return true;
+    }
+    if (event.physicalKey == PhysicalKeyboardKey.f1) return true;
+    if (key.keyLabel.toLowerCase().contains('red')) return true;
+    return false;
+  }
+
   void _toggleCurrentFavorite() {
     if (_currentChannel != null) {
       _channelService.toggleFavorite(_currentChannel!);
       setState(() {});
       _showToast(
         _currentChannel!.isFavorite
-            ? '⭐ ${_currentChannel!.name} favorilere eklendi'
-            : '⚪ ${_currentChannel!.name} favorilerden çıkarıldı',
+            ? '⭐ ${_currentChannel!.name} Favorilere Eklendi'
+            : '⚪ ${_currentChannel!.name} Favorilerden Çıkarıldı',
       );
     }
   }
@@ -301,10 +314,8 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
 
     final key = event.logicalKey;
 
-    // Kumanda Kırmızı Tuş Kontrolü (Android PROG_RED keycode 183 / F1)
-    if (key == LogicalKeyboardKey.f1 ||
-        key.keyId == 0x002000000b7 ||
-        key == LogicalKeyboardKey.gameButtonX) {
+    // Kumanda Kırmızı Tuş Kontrolü
+    if (_isRedKey(event)) {
       _toggleCurrentFavorite();
       return KeyEventResult.handled;
     }
@@ -322,6 +333,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
         setState(() {
           _isDrawerOpen = false;
         });
+        _screenFocusNode.requestFocus();
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
@@ -338,11 +350,9 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       });
       return KeyEventResult.handled;
     } else if (key == LogicalKeyboardKey.arrowDown || key == LogicalKeyboardKey.channelDown) {
-      // Aşağı Tuşu -> Sonraki Kanal (TV kuralı: 5 -> 6)
       _nextChannel();
       return KeyEventResult.handled;
     } else if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.channelUp) {
-      // Yukarı Tuşu -> Önceki Kanal (TV kuralı: 5 -> 4)
       _prevChannel();
       return KeyEventResult.handled;
     } else if (key == LogicalKeyboardKey.arrowRight) {
@@ -371,12 +381,12 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
         title: const Text('AydTV\'den çıkılsın mı?', style: TVTheme.tvTitle),
         content: const Text(
           'Uygulamayı kapatmak istediğinize emin misiniz?',
-          style: TextStyle(color: TVTheme.textSecondary, fontSize: 16),
+          style: TextStyle(color: TVTheme.textSecondary, fontSize: 15),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('İptal', style: TextStyle(color: TVTheme.textSecondary, fontSize: 16)),
+            child: const Text('İptal', style: TextStyle(color: TVTheme.textSecondary, fontSize: 15)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -384,7 +394,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
               foregroundColor: Colors.white,
             ),
             onPressed: () => SystemNavigator.pop(),
-            child: const Text('Çıkış', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            child: const Text('Çıkış', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
           ),
         ],
       ),
@@ -397,13 +407,16 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
+        // Menü açıksa SADECE menüyü kapat, kesinlikle uygulamadan çıkma!
         if (_isDrawerOpen) {
           setState(() {
             _isDrawerOpen = false;
           });
-        } else {
-          _showExitDialog();
+          _screenFocusNode.requestFocus();
+          return;
         }
+        // Menü kapalıysa onay sor
+        _showExitDialog();
       },
       child: Focus(
         focusNode: _screenFocusNode,
@@ -430,16 +443,16 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const SizedBox(
-                        width: 44,
-                        height: 44,
+                        width: 40,
+                        height: 40,
                         child: CircularProgressIndicator(
                           color: TVTheme.focusCyan,
                           strokeWidth: 3.5,
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 14),
                       Text(
-                        _currentChannel != null ? '${_currentChannel!.name} Açılıyor...' : 'AydTV Yükleniyor...',
+                        _currentChannel != null ? '${_currentChannel!.name} Başlatılıyor...' : 'AydTV Yükleniyor...',
                         style: TVTheme.tvChannelName.copyWith(color: TVTheme.focusCyan),
                       ),
                     ],
@@ -448,26 +461,26 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
               else if (_hasError)
                 Center(
                   child: Container(
-                    padding: const EdgeInsets.all(28),
+                    padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
                       color: TVTheme.surface.withValues(alpha: 0.92),
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(18),
                       border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5)),
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.cloud_off_rounded, color: Colors.redAccent, size: 54),
-                        const SizedBox(height: 14),
+                        const Icon(Icons.cloud_off_rounded, color: Colors.redAccent, size: 48),
+                        const SizedBox(height: 12),
                         Text('Yayın Hatası', style: TVTheme.tvTitle.copyWith(color: Colors.redAccent)),
                         const SizedBox(height: 6),
                         Text(_errorMessage, style: TVTheme.tvCategory),
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 16),
                         ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: TVTheme.focusCyan,
                             foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                           ),
                           onPressed: () {
                             if (_currentChannel != null) {
@@ -475,41 +488,40 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
                             }
                           },
                           icon: const Icon(Icons.refresh_rounded),
-                          label: const Text('Tekrar Dene', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                          label: const Text('Tekrar Dene', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ),
                   ),
                 ),
 
-              // 2. SAYI TUŞU GİRİŞİ GÖSTERGESİ (Sağ Üst Köşede Neon Rozet)
+              // 2. SAYI TUŞU GİRİŞİ GÖSTERGESİ
               if (_numberInputBuffer.isNotEmpty)
                 Positioned(
-                  top: 32,
-                  right: 48,
+                  top: 28,
+                  right: 40,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.85),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: TVTheme.focusCyan, width: 2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: TVTheme.focusCyan, width: 1.8),
                       boxShadow: [
                         BoxShadow(
-                          color: TVTheme.focusCyan.withValues(alpha: 0.4),
-                          blurRadius: 16,
-                          spreadRadius: 2,
+                          color: TVTheme.focusCyan.withValues(alpha: 0.35),
+                          blurRadius: 14,
                         ),
                       ],
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.dialpad_rounded, color: TVTheme.focusCyan, size: 22),
-                        const SizedBox(width: 10),
+                        const Icon(Icons.dialpad_rounded, color: TVTheme.focusCyan, size: 20),
+                        const SizedBox(width: 8),
                         Text(
                           'Kanal: $_numberInputBuffer',
                           style: const TextStyle(
-                            fontSize: 22,
+                            fontSize: 20,
                             fontWeight: FontWeight.bold,
                             color: Colors.white,
                             letterSpacing: 2,
@@ -520,7 +532,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
                   ),
                 ),
 
-              // 3. HIZLI ZAPPING BARI (Altta Önizleme)
+              // 3. HIZLI ZAPPING & TANITIM BARI (HUD)
               if (_showZappingBar && _currentChannel != null && !_isDrawerOpen)
                 QuickZappingBar(
                   channel: _currentChannel!,
@@ -528,7 +540,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
                   totalChannels: _channels.length,
                 ),
 
-              // 4. CAM EFEKTLİ KANAL LİSTESİ (OK Tuşuna Basınca Açılır)
+              // 4. LIQUID GLASS KANAL LİSTESİ
               if (_isDrawerOpen)
                 GlassDrawer(
                   channels: _channels,

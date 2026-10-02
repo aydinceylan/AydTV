@@ -54,7 +54,7 @@ class _ChannelCardState extends State<ChannelCard> {
           return KeyEventResult.handled;
         }
 
-        // Herhangi bir kanalda sağ/sol yapılınca kategoriyi değiştir
+        // Kategori Değiştirme (Sol / Sağ)
         if (key == LogicalKeyboardKey.arrowLeft) {
           widget.onPrevCategory?.call();
           return KeyEventResult.handled;
@@ -69,13 +69,13 @@ class _ChannelCardState extends State<ChannelCard> {
       child: GestureDetector(
         onTap: widget.onSelect,
         child: AnimatedScale(
-          scale: _isFocused ? 1.04 : 1.0,
-          duration: const Duration(milliseconds: 140),
+          scale: _isFocused ? 1.03 : 1.0,
+          duration: const Duration(milliseconds: 120),
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
-            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            duration: const Duration(milliseconds: 120),
+            margin: const EdgeInsets.symmetric(vertical: 3.5, horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
             decoration: TVTheme.focusDecoration(
               isFocused: _isFocused,
               isPlaying: widget.isPlaying,
@@ -84,30 +84,31 @@ class _ChannelCardState extends State<ChannelCard> {
               children: [
                 // Kanal Numarası
                 Container(
-                  width: 34,
+                  width: 26,
                   alignment: Alignment.center,
                   child: Text(
                     '${widget.index + 1}',
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: 14,
                       fontWeight: FontWeight.bold,
                       color: _isFocused
                           ? TVTheme.focusCyan
-                          : TVTheme.textSecondary.withValues(alpha: 0.8),
+                          : TVTheme.textSecondary.withValues(alpha: 0.7),
                     ),
                   ),
                 ),
 
-                const SizedBox(width: 6),
+                const SizedBox(width: 4),
 
-                // Kanal Logosu (Daha kompakt ve zarif)
+                // Kanal Logosu
                 Container(
-                  width: 52,
-                  height: 36,
-                  padding: const EdgeInsets.all(3),
+                  width: 44,
+                  height: 30,
+                  padding: const EdgeInsets.all(2),
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.35),
-                    borderRadius: BorderRadius.circular(8),
+                    color: Colors.black.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
                   ),
                   child: widget.channel.logo.isNotEmpty
                       ? CachedNetworkImage(
@@ -115,8 +116,8 @@ class _ChannelCardState extends State<ChannelCard> {
                           fit: BoxFit.contain,
                           placeholder: (context, url) => const Center(
                             child: SizedBox(
-                              width: 14,
-                              height: 14,
+                              width: 12,
+                              height: 12,
                               child: CircularProgressIndicator(
                                 strokeWidth: 1.5,
                                 color: TVTheme.focusCyan,
@@ -126,23 +127,23 @@ class _ChannelCardState extends State<ChannelCard> {
                           errorWidget: (context, url, error) => const Icon(
                             Icons.tv,
                             color: TVTheme.textSecondary,
-                            size: 22,
+                            size: 18,
                           ),
                         )
                       : const Icon(
                           Icons.tv,
                           color: TVTheme.textSecondary,
-                          size: 22,
+                          size: 18,
                         ),
                 ),
 
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
 
-                // Kanal Adı ve Kategori
+                // Kanal Adı + Mini EPG + İlerleme Çubuğu
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Row(
                         children: [
@@ -158,19 +159,18 @@ class _ChannelCardState extends State<ChannelCard> {
                             ),
                           ),
                           if (widget.isPlaying) ...[
-                            const SizedBox(width: 6),
+                            const SizedBox(width: 4),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                               decoration: BoxDecoration(
                                 color: TVTheme.liveGreen.withValues(alpha: 0.25),
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: TVTheme.liveGreen, width: 1),
+                                borderRadius: BorderRadius.circular(3),
                               ),
                               child: const Text(
-                                'YAYINDA',
+                                'CANLI',
                                 style: TextStyle(
                                   color: TVTheme.liveGreen,
-                                  fontSize: 9,
+                                  fontSize: 8,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -179,9 +179,25 @@ class _ChannelCardState extends State<ChannelCard> {
                         ],
                       ),
                       const SizedBox(height: 2),
+                      // Mini EPG Yayın Bilgisi
                       Text(
-                        widget.channel.category,
-                        style: TVTheme.tvCategory,
+                        widget.channel.currentProgram,
+                        style: TVTheme.tvEpg,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 3),
+                      // Mini EPG İlerleme Çubuğu
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: widget.channel.programProgress,
+                          minHeight: 2,
+                          backgroundColor: Colors.white.withValues(alpha: 0.08),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            _isFocused ? TVTheme.focusCyan : TVTheme.focusBlue.withValues(alpha: 0.7),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -190,11 +206,11 @@ class _ChannelCardState extends State<ChannelCard> {
                 // Favori Yıldızı
                 IconButton(
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
                   icon: Icon(
                     widget.channel.isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
-                    color: widget.channel.isFavorite ? TVTheme.favoriteGold : TVTheme.textSecondary,
-                    size: 22,
+                    color: widget.channel.isFavorite ? TVTheme.favoriteGold : TVTheme.textSecondary.withValues(alpha: 0.5),
+                    size: 20,
                   ),
                   onPressed: widget.onToggleFavorite,
                 ),
