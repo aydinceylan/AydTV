@@ -8,8 +8,10 @@ class ChannelCard extends StatefulWidget {
   final Channel channel;
   final int index;
   final bool isPlaying;
+  final bool isInitiallyFocused;
   final VoidCallback onSelect;
   final VoidCallback onToggleFavorite;
+  final ValueChanged<bool>? onFocusChanged;
   final VoidCallback? onPrevCategory;
   final VoidCallback? onNextCategory;
 
@@ -18,8 +20,10 @@ class ChannelCard extends StatefulWidget {
     required this.channel,
     required this.index,
     required this.isPlaying,
+    this.isInitiallyFocused = false,
     required this.onSelect,
     required this.onToggleFavorite,
+    this.onFocusChanged,
     this.onPrevCategory,
     this.onNextCategory,
   });
@@ -34,11 +38,12 @@ class _ChannelCardState extends State<ChannelCard> {
   @override
   Widget build(BuildContext context) {
     return Focus(
-      autofocus: widget.index == 0,
+      autofocus: widget.isInitiallyFocused,
       onFocusChange: (focused) {
         setState(() {
           _isFocused = focused;
         });
+        widget.onFocusChanged?.call(focused);
       },
       onKeyEvent: (node, event) {
         if (event is! KeyDownEvent) return KeyEventResult.ignored;
@@ -69,13 +74,13 @@ class _ChannelCardState extends State<ChannelCard> {
       child: GestureDetector(
         onTap: widget.onSelect,
         child: AnimatedScale(
-          scale: _isFocused ? 1.03 : 1.0,
+          scale: _isFocused ? 1.02 : 1.0,
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            margin: const EdgeInsets.symmetric(vertical: 3.5, horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+            margin: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             decoration: TVTheme.focusDecoration(
               isFocused: _isFocused,
               isPlaying: widget.isPlaying,
@@ -103,10 +108,10 @@ class _ChannelCardState extends State<ChannelCard> {
                 // Kanal Logosu
                 Container(
                   width: 44,
-                  height: 30,
+                  height: 32,
                   padding: const EdgeInsets.all(2),
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.4),
+                    color: Colors.black.withValues(alpha: 0.45),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
                   ),
@@ -139,7 +144,7 @@ class _ChannelCardState extends State<ChannelCard> {
 
                 const SizedBox(width: 8),
 
-                // Kanal Adı + Mini EPG + İlerleme Çubuğu
+                // Kanal Adı + Mini EPG Yayın Bilgisi (İlerleme çubuğu kaldırıldı)
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -159,7 +164,7 @@ class _ChannelCardState extends State<ChannelCard> {
                             ),
                           ),
                           if (widget.isPlaying) ...[
-                            const SizedBox(width: 4),
+                            const SizedBox(width: 5),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                               decoration: BoxDecoration(
@@ -179,25 +184,17 @@ class _ChannelCardState extends State<ChannelCard> {
                         ],
                       ),
                       const SizedBox(height: 2),
-                      // Mini EPG Yayın Bilgisi
+                      // Mini EPG Gerçek Yayın Akışı Metni
                       Text(
                         widget.channel.currentProgram,
-                        style: TVTheme.tvEpg,
+                        style: TVTheme.tvEpg.copyWith(
+                          fontSize: 10.5,
+                          color: _isFocused
+                              ? TVTheme.focusCyan.withValues(alpha: 0.9)
+                              : TVTheme.textSecondary.withValues(alpha: 0.8),
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 3),
-                      // Mini EPG İlerleme Çubuğu
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(2),
-                        child: LinearProgressIndicator(
-                          value: widget.channel.programProgress,
-                          minHeight: 2,
-                          backgroundColor: Colors.white.withValues(alpha: 0.08),
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            _isFocused ? TVTheme.focusCyan : TVTheme.focusBlue.withValues(alpha: 0.7),
-                          ),
-                        ),
                       ),
                     ],
                   ),
@@ -209,7 +206,7 @@ class _ChannelCardState extends State<ChannelCard> {
                   constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
                   icon: Icon(
                     widget.channel.isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
-                    color: widget.channel.isFavorite ? TVTheme.favoriteGold : TVTheme.textSecondary.withValues(alpha: 0.5),
+                    color: widget.channel.isFavorite ? TVTheme.favoriteGold : TVTheme.textSecondary.withValues(alpha: 0.4),
                     size: 20,
                   ),
                   onPressed: widget.onToggleFavorite,

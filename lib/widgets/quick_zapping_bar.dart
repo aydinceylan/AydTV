@@ -159,35 +159,15 @@ class QuickZappingBar extends StatelessWidget {
                       ),
                       const SizedBox(height: 3),
                       // EPG Yayın Bilgisi
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              channel.currentProgram,
-                              style: const TextStyle(
-                                color: Color(0xFFCFD8DC),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          // Mini İlerleme Çubuğu
-                          SizedBox(
-                            width: 80,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(2),
-                              child: LinearProgressIndicator(
-                                value: channel.programProgress,
-                                minHeight: 3,
-                                backgroundColor: Colors.white12,
-                                valueColor: const AlwaysStoppedAnimation<Color>(TVTheme.focusCyan),
-                              ),
-                            ),
-                          ),
-                        ],
+                      Text(
+                        channel.currentProgram,
+                        style: const TextStyle(
+                          color: Color(0xFFCFD8DC),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import '../models/channel.dart';
 import '../services/channel_service.dart';
+import '../services/epg_service.dart';
 import '../services/update_service.dart';
 import '../theme/tv_theme.dart';
 import '../widgets/glass_drawer.dart';
@@ -19,6 +20,7 @@ class TVPlayerScreen extends StatefulWidget {
 class _TVPlayerScreenState extends State<TVPlayerScreen> {
   final ChannelService _channelService = ChannelService();
   final UpdateService _updateService = UpdateService();
+  final EpgService _epgService = EpgService();
 
   List<Channel> _channels = [];
   Channel? _currentChannel;
@@ -30,6 +32,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
   String _errorMessage = '';
 
   bool _isDrawerOpen = false;
+  DateTime? _lastDrawerClosedAt;
   bool _showZappingBar = false;
   Timer? _zappingBarTimer;
 
@@ -70,6 +73,11 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       }
 
       _playChannel(channels[startIndex], startIndex);
+
+      // TV+ Gerçek Zamanlı EPG Bilgisini Arka Planda Çek
+      _epgService.syncAllEpg(_channels, () {
+        if (mounted) setState(() {});
+      });
     }
 
     _syncChannelsInBackground();
@@ -81,7 +89,10 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       setState(() {
         _channels = updatedChannels;
       });
-      _showToast('✨ Kanal listesi GitHub üzerinden güncellendi!');
+      // Arka planda sessiz güncelleme - kullanıcıya rahatsız edici toast gösterilmez
+      _epgService.syncAllEpg(_channels, () {
+        if (mounted) setState(() {});
+      });
     }
   }
 
@@ -186,27 +197,45 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     );
   }
 
-  Future<void> _playChannel(Channel channel, int index) async {
-    if (_currentChannel?.id == channel.id && _controller != null && _controller!.value.isPlaying) {
+  /// Çoklu Kaynak Yedekleme (Failover): Birincil yayın hata verirse yedek yayınları dener
+  Future<void> _playChannel(Channel channel, int index, {int urlIndex = 0}) async {
+    final allUrls = [channel.url, ...channel.backupUrls];
+
+    if (urlIndex == 0) {
+      if (_currentChannel?.id == channel.id && _controller != null && _controller!.value.isPlaying) {
+        return;
+      }
+
+      setState(() {
+        _isLoading = true;
+        _hasError = false;
+        _currentChannel = channel;
+        _currentChannelIndex = index;
+      });
+
+      _channelService.saveLastChannelId(channel.id);
+      _triggerZappingBar();
+
+      final oldController = _controller;
+      _controller = null;
+      await oldController?.dispose();
+    }
+
+    if (urlIndex >= allUrls.length) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+          _errorMessage = 'Yayın başlatılamadı. Tüm (${allUrls.length}) kaynak denendi.';
+        });
+      }
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-      _hasError = false;
-      _currentChannel = channel;
-      _currentChannelIndex = index;
-    });
-
-    _channelService.saveLastChannelId(channel.id);
-    _triggerZappingBar();
-
-    final oldController = _controller;
-    _controller = null;
-    await oldController?.dispose();
+    final targetUrl = allUrls[urlIndex];
 
     try {
-      final uri = Uri.parse(channel.url);
+      final uri = Uri.parse(targetUrl);
       final newController = VideoPlayerController.networkUrl(
         uri,
         httpHeaders: channel.headers ?? {},
@@ -223,12 +252,17 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _hasError = true;
-          _errorMessage = 'Yayın başlatılamadı. Link geçici olarak çevrimdışı olabilir.';
-        });
+      // Birincil link başarısız olduysa sıradaki yedeği dene
+      if (urlIndex + 1 < allUrls.length) {
+        await _playChannel(channel, index, urlIndex: urlIndex + 1);
+      } else {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _hasError = true;
+            _errorMessage = 'Yayın başlatılamadı. Link geçici olarak çevrimdışı olabilir.';
+          });
+        }
       }
     }
   }
@@ -295,16 +329,25 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     return false;
   }
 
-  void _toggleCurrentFavorite() {
-    if (_currentChannel != null) {
-      _channelService.toggleFavorite(_currentChannel!);
-      setState(() {});
-      _showToast(
-        _currentChannel!.isFavorite
-            ? '⭐ ${_currentChannel!.name} Favorilere Eklendi'
-            : '⚪ ${_currentChannel!.name} Favorilerden Çıkarıldı',
-      );
+  void _toggleFavorite(Channel ch) {
+    final willBeFav = !ch.isFavorite;
+    _channelService.toggleFavorite(ch);
+    setState(() {});
+    _showToast(
+      willBeFav
+          ? '⭐ ${ch.name} Favorilere Eklendi'
+          : '⚪ ${ch.name} Favorilerden Çıkarıldı',
+    );
+  }
+
+  void _closeDrawer() {
+    _lastDrawerClosedAt = DateTime.now();
+    if (_isDrawerOpen) {
+      setState(() {
+        _isDrawerOpen = false;
+      });
     }
+    _screenFocusNode.requestFocus();
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
@@ -314,9 +357,20 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
 
     final key = event.logicalKey;
 
-    // Kumanda Kırmızı Tuş Kontrolü
+    // Menü açıkken geri tuşu sadece menüyü kapatır
+    if (_isDrawerOpen) {
+      if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
+        _closeDrawer();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    // Kumanda Kırmızı Tuş Kontrolü (Tam ekranda o anki kanalı favoriler)
     if (_isRedKey(event)) {
-      _toggleCurrentFavorite();
+      if (_currentChannel != null) {
+        _toggleFavorite(_currentChannel!);
+      }
       return KeyEventResult.handled;
     }
 
@@ -325,18 +379,6 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     if (RegExp(r'^[0-9]$').hasMatch(keyLabel)) {
       _handleNumberInput(keyLabel);
       return KeyEventResult.handled;
-    }
-
-    // Menü Açıkken Kumanda Mantığı
-    if (_isDrawerOpen) {
-      if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
-        setState(() {
-          _isDrawerOpen = false;
-        });
-        _screenFocusNode.requestFocus();
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.ignored;
     }
 
     // Menü Kapalıyken (Tam Ekran) Kumanda Mantığı
@@ -409,32 +451,36 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
         if (didPop) return;
         // Menü açıksa SADECE menüyü kapat, kesinlikle uygulamadan çıkma!
         if (_isDrawerOpen) {
-          setState(() {
-            _isDrawerOpen = false;
-          });
-          _screenFocusNode.requestFocus();
+          _closeDrawer();
+          return;
+        }
+        // Eğer menü az önce kapatıldıysa donanımsal geri tuşunu yut, çıkış sorma!
+        if (_lastDrawerClosedAt != null &&
+            DateTime.now().difference(_lastDrawerClosedAt!) < const Duration(milliseconds: 700)) {
           return;
         }
         // Menü kapalıysa onay sor
         _showExitDialog();
       },
-      child: Focus(
-        focusNode: _screenFocusNode,
-        autofocus: true,
-        onKeyEvent: _handleKeyEvent,
-        child: Scaffold(
-          backgroundColor: TVTheme.background,
-          body: Stack(
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Focus(
+          focusNode: _screenFocusNode,
+          autofocus: true,
+          onKeyEvent: _handleKeyEvent,
+          child: Stack(
             fit: StackFit.expand,
             children: [
-              // 1. TAM EKRAN VİDEO KATMANI
+              // 1. TAM EKRAN CANLI YAYIN OYNATICI
               if (_controller != null && _controller!.value.isInitialized)
-                Center(
-                  child: AspectRatio(
-                    aspectRatio: _controller!.value.aspectRatio > 0
-                        ? _controller!.value.aspectRatio
-                        : 16 / 9,
-                    child: VideoPlayer(_controller!),
+                Positioned.fill(
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: _controller!.value.size.width,
+                      height: _controller!.value.size.height,
+                      child: VideoPlayer(_controller!),
+                    ),
                   ),
                 )
               else if (_isLoading)
@@ -550,13 +596,10 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
                     _playChannel(ch, idx != -1 ? idx : 0);
                   },
                   onToggleFavorite: (ch) {
-                    _channelService.toggleFavorite(ch);
+                    _toggleFavorite(ch);
                   },
                   onClose: () {
-                    setState(() {
-                      _isDrawerOpen = false;
-                    });
-                    _screenFocusNode.requestFocus();
+                    _closeDrawer();
                   },
                 ),
             ],
