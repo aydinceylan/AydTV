@@ -16,9 +16,9 @@
     "name": "ATV",
     "category": "Ulusal",
     "logo": "https://i.imgur.com/HyVUwFC.png",
-    "url": "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/atv/atv_480p.m3u8",
+    "url": "https://live.duhnet.tv/S2/HLS_LIVE/atv/playlist.m3u8",
     "backupUrls": [
-      "https://live.duhnet.tv/S2/HLS_LIVE/atv/playlist.m3u8",
+      "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/atv/atv_1080p.m3u8",
       "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/atv/atv.m3u8"
     ],
     "epgId": "124"
@@ -28,8 +28,10 @@
     "name": "NOW TV",
     "category": "Ulusal",
     "logo": "https://i.imgur.com/5EYjWK7.png",
-    "url": "https://uycyyuuzyh.turknet.ercdn.net/nphindgytw/nowtv/nowtv.m3u8",
-    "backupUrls": [],
+    "url": "https://nowtv.daioncdn.net/nowtv/nowtv.m3u8?ce=3&app=65fa8997-2b2f-4529-85ea-84318628a608&st=yw8ATjX8c13R1gfjhXboYQ&e=1790983453",
+    "backupUrls": [
+      "https://nowtv-live-ad.ercdn.net/nowtv/playlist.m3u8?st=yw8ATjX8c13R1gfjhXboYQ&e=1790983453"
+    ],
     "epgId": "93"
   },
   {
@@ -37,9 +39,9 @@
     "name": "Kanal D",
     "category": "Ulusal",
     "logo": "https://i.imgur.com/9o1atM6.png",
-    "url": "https://ackaxsqacw.turknet.ercdn.net/ozfkfbbjba/kanald/kanald.m3u8",
+    "url": "https://demiroren.daioncdn.net/kanald/kanald.m3u8?app=kanald_web&ce=3",
     "backupUrls": [
-      "https://demiroren.daioncdn.net/kanald/kanald.m3u8?app=kanald_web&ce=3"
+      "https://ackaxsqacw.turknet.ercdn.net/ozfkfbbjba/kanald/kanald.m3u8"
     ],
     "epgId": "88"
   },
@@ -48,9 +50,10 @@
     "name": "TV8",
     "category": "Ulusal",
     "logo": "https://upload.wikimedia.org/wikipedia/tr/thumb/6/68/Tv8_Yeni_Logo.png/960px-Tv8_Yeni_Logo.png",
-    "url": "https://rkhubpaomb.turknet.ercdn.net/fwjkgpasof/tv8/tv8.m3u8",
+    "url": "https://tv8.daioncdn.net/tv8/tv8.m3u8?app=7ddc255a-ef47-4e81-ab14-c0e5f2949788&ce=3",
     "backupUrls": [
-      "https://tv8.daioncdn.net/tv8/tv8.m3u8?app=7ddc255a-ef47-4e81-ab14-c0e5f2949788&ce=3"
+      "https://tv8-live.daioncdn.net/tv8/tv8.m3u8",
+      "https://rkhubpaomb.turknet.ercdn.net/fwjkgpasof/tv8/tv8.m3u8"
     ],
     "epgId": "134"
   },
@@ -68,9 +71,9 @@
     "name": "Show TV",
     "category": "Ulusal",
     "logo": "https://i.imgur.com/fdZpGDj.png",
-    "url": "https://rmtftbjlne.turknet.ercdn.net/bpeytmnqyp/showtv/showtv.m3u8",
+    "url": "https://ciner.daioncdn.net/showtv/showtv.m3u8?ce=3&app=4bc856ef-4c68-4a94-bc87-37dfaaa66558&tv=1",
     "backupUrls": [
-      "https://ciner-live.daioncdn.net/showtv/showtv.m3u8"
+      "https://rmtftbjlne.turknet.ercdn.net/bpeytmnqyp/showtv/showtv.m3u8"
     ],
     "epgId": "130"
   },
@@ -194,8 +197,10 @@
     "name": "A Haber",
     "category": "Haber",
     "logo": "https://upload.wikimedia.org/wikipedia/commons/7/7c/Ahaber_Logo.png",
-    "url": "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/ahaber/ahaber.m3u8",
-    "backupUrls": [],
+    "url": "https://live.duhnet.tv/S2/HLS_LIVE/ahaber/playlist.m3u8",
+    "backupUrls": [
+      "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/ahaber/ahaber.m3u8"
+    ],
     "epgId": "160"
   },
   {
@@ -214,10 +219,9 @@
     "name": "Habertürk TV",
     "category": "Haber",
     "logo": "https://i.imgur.com/6Tw3rUp.png",
-    "url": "https://rmtftbjlne.turknet.ercdn.net/bpeytmnqyp/haberturktv/haberturktv_1080p.m3u8",
+    "url": "https://tv.ensonhaber.com/haberturk/haberturk.m3u8",
     "backupUrls": [
-      "https://tv.ensonhaber.com/haberturk/haberturk.m3u8",
-      "https://ensonhaber-live.ercdn.net/haberturk/haberturk.m3u8"
+      "https://ciner-live.ercdn.net/haberturktv/haberturktv.m3u8"
     ],
     "epgId": "87"
   },
@@ -332,9 +336,10 @@
     "name": "TRT Spor Yıldız",
     "category": "Spor",
     "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/TRT_Spor_Y%C4%B1ld%C4%B1z_logo_%282021%29.svg/800px-TRT_Spor_Y%C4%B1ld%C4%B1z_logo_%282021%29.svg.png",
-    "url": "https://tv-trtspor2.medya.trt.com.tr/master.m3u8",
+    "url": "https://tv-trtspor2.medya.trt.com.tr/master_720.m3u8",
     "backupUrls": [
-      "https://tv-trtspor2.medya.trt.com.tr/master_720.m3u8"
+      "https://tv-trtspor2.medya.trt.com.tr/master_1080.m3u8",
+      "https://tv-trtspor2-esdai.medya.trt.com.tr/master.m3u8"
     ],
     "epgId": "205"
   },
@@ -343,9 +348,9 @@
     "name": "A Spor",
     "category": "Spor",
     "logo": "https://i.imgur.com/ZhkZzLf.png",
-    "url": "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/aspor/aspor.m3u8",
+    "url": "https://live.duhnet.tv/S2/HLS_LIVE/aspor/playlist.m3u8",
     "backupUrls": [
-      "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/aspor/aspor_720p.m3u8"
+      "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/aspor/aspor.m3u8"
     ],
     "epgId": "3"
   },
@@ -354,8 +359,10 @@
     "name": "HT Spor",
     "category": "Spor",
     "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/91/HT_Spor_logosu.png/800px-HT_Spor_logosu.png",
-    "url": "https://rmtftbjlne.turknet.ercdn.net/bpeytmnqyp/ht-spor/ht-spor.m3u8",
-    "backupUrls": [],
+    "url": "https://ciner.daioncdn.net/ht-spor/ht-spor.m3u8?app=web",
+    "backupUrls": [
+      "https://rmtftbjlne.turknet.ercdn.net/bpeytmnqyp/ht-spor/ht-spor.m3u8"
+    ],
     "epgId": "4396"
   },
   {
@@ -390,9 +397,9 @@
     "name": "Tivibu Spor",
     "category": "Spor",
     "logo": "https://assets.uzunmuhalefet.com/logos/3d0c0f6a-3deb-4bfa-a0f7-243827fed0ff.png",
-    "url": "https://trn03.tulix.tv/gt-tivibuspor1/playlist.m3u8",
+    "url": "https://1.nejyoner19.workers.dev/?url=https://corestream.ronaldovurdu.help//hls/tivibu-spor-1.m3u8",
     "backupUrls": [
-      "https://1.nejyoner19.workers.dev/?url=https://corestream.ronaldovurdu.help//hls/tivibu-spor-1.m3u8"
+      "https://trn03.tulix.tv/gt-tivibuspor1/playlist.m3u8"
     ],
     "epgId": null
   },

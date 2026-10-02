@@ -261,7 +261,8 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
         httpHeaders: channel.headers ?? {},
       );
 
-      await newController.initialize();
+      // Yavaş veya takılan yayınları engellemek için 4 saniye zaman aşımı
+      await newController.initialize().timeout(const Duration(seconds: 4));
 
       // Kanal initialize olurken arkada yeni bir kanal seçildiyse bunu iptal et
       if (thisRequestId != _playRequestId) {
@@ -467,17 +468,23 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       _onChannelStep(-1);
       return KeyEventResult.handled;
     } else if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
-      _showExitDialog();
-      return KeyEventResult.handled;
+      // Donanımsal geri tuşunu PopScope yönetir; böylece diyalogun açılıp anında kapanma çakışması önlenir
+      return KeyEventResult.ignored;
     }
 
     return KeyEventResult.ignored;
   }
 
+  bool _isExitDialogOpen = false;
+
   void _showExitDialog() {
+    if (_isExitDialogOpen || !mounted) return;
+    _isExitDialogOpen = true;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: TVTheme.surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
@@ -489,21 +496,38 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
           style: TextStyle(color: TVTheme.textSecondary, fontSize: 15),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('İptal', style: TextStyle(color: TVTheme.textSecondary, fontSize: 15)),
+          ElevatedButton(
+            autofocus: true,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: TVTheme.liquidCardBg,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            onPressed: () {
+              Navigator.pop(dialogContext);
+            },
+            child: const Text('İptal', style: TextStyle(fontSize: 15)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.redAccent,
               foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
-            onPressed: () => SystemNavigator.pop(),
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              SystemNavigator.pop();
+            },
             child: const Text('Çıkış', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
           ),
         ],
       ),
-    );
+    ).then((_) {
+      _isExitDialogOpen = false;
+      if (mounted) {
+        _screenFocusNode.requestFocus();
+      }
+    });
   }
 
   @override
