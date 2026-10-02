@@ -12,7 +12,7 @@ class ChannelService {
 
   // GitHub üzerinden dinamik güncellenebilir raw URL
   static const String remoteUrl =
-      'https://raw.githubusercontent.com/aydinceylan/AydTv_App/main/channels.json';
+      'https://raw.githubusercontent.com/aydinceylan/AydTV/main/channels.json';
 
   /// Kanalları önce yerel önbellek / asset'ten yükler (0 ms açılış)
   Future<List<Channel>> loadInitialChannels() async {

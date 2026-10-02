@@ -18,7 +18,7 @@ class UpdateInfo {
 class UpdateService {
   static const String currentVersion = '1.0.0';
   static const String githubApiUrl =
-      'https://api.github.com/repos/aydinceylan/AydTv_App/releases/latest';
+      'https://api.github.com/repos/aydinceylan/AydTV/releases/latest';
 
   /// GitHub Releases üzerinden yeni APK olup olmadığını kontrol eder
   Future<UpdateInfo?> checkForUpdate() async {
