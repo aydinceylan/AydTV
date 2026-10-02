@@ -28,6 +28,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
   int _targetChannelIndex = 0;
 
   VideoPlayerController? _controller;
+  String? _playingChannelId;
   bool _isLoading = true;
   bool _hasError = false;
   String _errorMessage = '';
@@ -203,7 +204,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     );
   }
 
-  /// Çoklu Kaynak ve Yarış Durumu Korumalı Oynatıcı
+  /// Çoklu Kaynak ve Yarış Durumu (Race Condition) Korumalı Oynatıcı
   Future<void> _playChannel(Channel channel, int index, {int urlIndex = 0, int? requestId}) async {
     final allUrls = [channel.url, ...channel.backupUrls];
     final thisRequestId = requestId ?? ++_playRequestId;
@@ -211,10 +212,11 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     if (urlIndex == 0) {
       _targetChannelIndex = index;
 
-      if (_controller != null &&
+      // Eğer gerçekten bu kanal zaten video playerda çalıyorsa tekrar başlatma
+      if (_playingChannelId == channel.id &&
+          _controller != null &&
           _controller!.value.isInitialized &&
-          _controller!.value.isPlaying &&
-          _currentChannel?.id == channel.id) {
+          _controller!.value.isPlaying) {
         return;
       }
 
@@ -230,9 +232,10 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
 
       final oldController = _controller;
       _controller = null;
+      _playingChannelId = null;
       await oldController?.dispose();
 
-      // Eski istekse hemen durdur
+      // Eski istekse durdur
       if (thisRequestId != _playRequestId) {
         return;
       }
@@ -260,7 +263,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
 
       await newController.initialize();
 
-      // Kanal initialize olurken arkada yeni bir kanala tıklandıysa eski isteği çöpe at
+      // Kanal initialize olurken arkada yeni bir kanal seçildiyse bunu iptal et
       if (thisRequestId != _playRequestId) {
         await newController.dispose();
         return;
@@ -272,6 +275,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       if (mounted && thisRequestId == _playRequestId) {
         setState(() {
           _controller = newController;
+          _playingChannelId = channel.id; // Oynatma başarıyla sağlandı!
           _isLoading = false;
         });
       }
@@ -307,7 +311,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     });
   }
 
-  /// Hızlı kanal atlamalarında (Up/Down) HUD anında güncellenir, stream 350ms durulunca bağlanır
+  /// Hızlı kanal atlamalarında (Up/Down) HUD anında güncellenir, stream 250ms sonra bağlanır
   void _onChannelStep(int delta) {
     if (_channels.isEmpty) return;
     _targetChannelIndex = (_targetChannelIndex + delta + _channels.length) % _channels.length;
@@ -321,9 +325,9 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     });
     _triggerZappingBar();
 
-    // Hızlı basıldığında eski istekleri iptal et, 350ms bekleyip hedef kanalı aç
+    // Hızlı basımları debounce et, 250ms durulunca hedef kanalı aç
     _zappingDebounceTimer?.cancel();
-    _zappingDebounceTimer = Timer(const Duration(milliseconds: 350), () {
+    _zappingDebounceTimer = Timer(const Duration(milliseconds: 250), () {
       if (mounted) {
         _playChannel(targetChannel, _targetChannelIndex);
       }
@@ -367,6 +371,21 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     return false;
   }
 
+  bool _isInfoKey(KeyEvent event) {
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.info ||
+        key == LogicalKeyboardKey.guide ||
+        key.keyId == 165 ||
+        key.keyId == 172 ||
+        key.keyId == 0x002000000a5 ||
+        key.keyId == 0x00000000000000a5 ||
+        key.keyLabel.toLowerCase().contains('info') ||
+        key.keyLabel.toLowerCase().contains('guide')) {
+      return true;
+    }
+    return false;
+  }
+
   void _toggleFavorite(Channel ch) {
     final willBeFav = !ch.isFavorite;
     _channelService.toggleFavorite(ch);
@@ -394,6 +413,12 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     }
 
     final key = event.logicalKey;
+
+    // Info Tuşu: Banner HUD'u her zaman açar / gösterir
+    if (_isInfoKey(event)) {
+      _triggerZappingBar();
+      return KeyEventResult.handled;
+    }
 
     // Menü açıkken geri tuşu sadece menüyü kapatır
     if (_isDrawerOpen) {
