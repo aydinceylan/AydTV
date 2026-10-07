@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/channel.dart';
+import '../services/epg_service.dart';
 import '../theme/tv_theme.dart';
 
 class QuickZappingBar extends StatelessWidget {
@@ -158,9 +159,10 @@ class QuickZappingBar extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 3),
-                      // EPG Yayın Bilgisi
+                      // EPG Yayın Bilgisi (Dinamik ve Anlık Canlı Program)
                       Text(
-                        channel.currentProgram,
+                        EpgService().getCurrentProgramInfo(channel.epgId) ??
+                            channel.currentProgram,
                         style: const TextStyle(
                           color: Color(0xFFCFD8DC),
                           fontSize: 12.5,

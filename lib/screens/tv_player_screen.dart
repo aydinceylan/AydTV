@@ -53,6 +53,9 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
   bool _isAutoReconnecting = false;
   int _consecutiveStalls = 0;
 
+  // EPG Canlı Zamanlayıcı (Dakikalık EPG yenileme)
+  Timer? _epgUpdateTimer;
+
   final FocusNode _screenFocusNode = FocusNode();
 
   @override
@@ -61,10 +64,14 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     _initializeChannels();
     _checkAppUpdates();
     _startFreezeDetector();
+    _epgUpdateTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
+    _epgUpdateTimer?.cancel();
     _freezeCheckTimer?.cancel();
     _zappingBarTimer?.cancel();
     _zappingDebounceTimer?.cancel();

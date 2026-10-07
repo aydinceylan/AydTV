@@ -15,7 +15,8 @@ class EpgProgram {
   });
 
   bool isCurrent(DateTime now) {
-    return now.isAfter(startTime) && now.isBefore(endTime);
+    return (now.isAfter(startTime) || now.isAtSameMomentAs(startTime)) &&
+        now.isBefore(endTime);
   }
 
   String get timeFormatted {
@@ -88,15 +89,26 @@ class EpgService {
     return false;
   }
 
+  /// TV+'tan gelen "2026-10-07 23:15:00 UTC+03:00" formatını eksiksiz parse eder
   DateTime? _parseDateTime(String? raw) {
-    if (raw == null || raw.length < 19) return null;
+    if (raw == null || raw.trim().isEmpty) return null;
     try {
-      final datePart = raw.substring(0, 10);
-      final timePart = raw.substring(11, 19);
-      return DateTime.tryParse('${datePart}T$timePart');
-    } catch (_) {
-      return null;
-    }
+      String cleaned = raw.trim();
+      cleaned = cleaned.replaceAll(' UTC', '');
+      cleaned = cleaned.replaceFirst(' ', 'T');
+      // Format: "2026-10-07T23:15:00+03:00"
+      final parsed = DateTime.tryParse(cleaned);
+      if (parsed != null) {
+        return parsed.toLocal();
+      }
+      // Yedek parse
+      if (raw.length >= 19) {
+        final d = raw.substring(0, 10);
+        final t = raw.substring(11, 19);
+        return DateTime.tryParse('${d}T$t')?.toLocal();
+      }
+    } catch (_) {}
+    return null;
   }
 
   Future<List<EpgProgram>> fetchChannelSchedule(String epgId) async {
@@ -165,23 +177,34 @@ class EpgService {
     return [];
   }
 
+  /// O anki canlı program bilgisini DateTime.now()'a göre dinamik ve anlık hesaplar
   String? getCurrentProgramInfo(String? epgId) {
     if (epgId == null || !_cache.containsKey(epgId)) return null;
 
     final now = DateTime.now();
     final programs = _cache[epgId]!;
+    if (programs.isEmpty) return null;
 
+    // 1. Canlı olarak şu an yayında olan programı bul
     for (var p in programs) {
       if (p.isCurrent(now)) {
         return '${p.timeFormatted} ${p.name}';
       }
     }
 
-    // Eğer tam o anki dakika denk gelmediyse en yakın bir sonraki veya son programı göster
+    // 2. Tam aralık denk gelmediyse, şu anki saate en yakın programı seç
+    EpgProgram? closest;
+    Duration? minDiff;
     for (var p in programs) {
-      if (p.startTime.isAfter(now)) {
-        return '${p.timeFormatted} ${p.name}';
+      final diff = (p.startTime.difference(now)).abs();
+      if (minDiff == null || diff < minDiff) {
+        minDiff = diff;
+        closest = p;
       }
+    }
+
+    if (closest != null) {
+      return '${closest.timeFormatted} ${closest.name}';
     }
 
     return null;
@@ -192,13 +215,11 @@ class EpgService {
     final epgChannels = channels.where((c) => c.epgId != null && c.epgId!.isNotEmpty).toList();
     if (epgChannels.isEmpty) return;
 
-    // İlk authentication
     final ok = await _authenticate();
     if (!ok) return;
 
     bool hasAnyUpdate = false;
 
-    // 4'lü gruplar halinde çek
     const batchSize = 4;
     for (int i = 0; i < epgChannels.length; i += batchSize) {
       final batch = epgChannels.skip(i).take(batchSize);

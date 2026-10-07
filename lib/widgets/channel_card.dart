@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/channel.dart';
+import '../services/epg_service.dart';
 import '../theme/tv_theme.dart';
 
 class ChannelCard extends StatefulWidget {
@@ -192,9 +193,10 @@ class _ChannelCardState extends State<ChannelCard> {
                         ],
                       ),
                       const SizedBox(height: 2),
-                      // Mini EPG Gerçek Yayın Akışı Metni
+                      // Mini EPG Gerçek Yayın Akışı Metni (Dinamik ve Anlık Canlı Program)
                       Text(
-                        widget.channel.currentProgram,
+                        EpgService().getCurrentProgramInfo(widget.channel.epgId) ??
+                            widget.channel.currentProgram,
                         style: TVTheme.tvEpg.copyWith(
                           fontSize: 10.5,
                           color: _isFocused

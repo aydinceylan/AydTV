@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -32,6 +33,10 @@ class _GlassDrawerState extends State<GlassDrawer> {
   final FocusNode _emptyFocusNode = FocusNode();
   List<FocusNode> _channelFocusNodes = [];
 
+  // Menü içindeyken Sayı Tuşlarıyla Kanal Değiştirme (0-9)
+  String _numberInputBuffer = '';
+  Timer? _numberInputTimer;
+
   @override
   void initState() {
     super.initState();
@@ -47,18 +52,40 @@ class _GlassDrawerState extends State<GlassDrawer> {
       initialIdx = 0;
     }
 
-    final double initialOffset = (initialIdx > 2) ? (initialIdx - 1) * 58.0 : 0.0;
-    _scrollController = ScrollController(initialScrollOffset: initialOffset);
+    _scrollController = ScrollController();
 
+    // Açık olan kanalın listede ortalanması ve doğrudan seçili gelmesi
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (channels.isEmpty) {
         _emptyFocusNode.requestFocus();
       } else if (initialIdx >= 0 && initialIdx < _channelFocusNodes.length) {
+        _scrollToIndex(initialIdx);
         _channelFocusNodes[initialIdx].requestFocus();
-        _focusedChannel = channels[initialIdx];
+        setState(() {
+          _focusedChannel = channels[initialIdx];
+        });
       }
     });
+  }
+
+  void _scrollToIndex(int index, {bool animate = false}) {
+    if (!_scrollController.hasClients || index < 0) return;
+    final viewportHeight = _scrollController.position.viewportDimension;
+    const itemHeight = 62.0; // ChannelCard dikey yüksekliği
+    // Seçili kanalı tam ekranın dikey merkezine getir
+    final targetOffset = (index * itemHeight) - (viewportHeight / 2) + (itemHeight / 2);
+    final clampedOffset = targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent);
+
+    if (animate) {
+      _scrollController.animateTo(
+        clampedOffset,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      _scrollController.jumpTo(clampedOffset);
+    }
   }
 
   void _updateFocusNodes() {
@@ -74,6 +101,7 @@ class _GlassDrawerState extends State<GlassDrawer> {
 
   @override
   void dispose() {
+    _numberInputTimer?.cancel();
     for (var node in _channelFocusNodes) {
       node.dispose();
     }
@@ -142,6 +170,38 @@ class _GlassDrawerState extends State<GlassDrawer> {
     }
   }
 
+  void _handleNumberInput(String digit) {
+    _numberInputTimer?.cancel();
+    setState(() {
+      if (_numberInputBuffer.length < 3) {
+        _numberInputBuffer += digit;
+      }
+    });
+
+    _numberInputTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (_numberInputBuffer.isNotEmpty && mounted) {
+        final channelNum = int.tryParse(_numberInputBuffer);
+        if (channelNum != null && channelNum > 0) {
+          final channels = _filteredChannels;
+          int targetIdx = (channelNum - 1).clamp(0, channels.length - 1);
+          final targetCh = channels[targetIdx];
+
+          widget.onChannelSelect(targetCh);
+          _scrollToIndex(targetIdx, animate: true);
+          if (targetIdx < _channelFocusNodes.length) {
+            _channelFocusNodes[targetIdx].requestFocus();
+          }
+          setState(() {
+            _focusedChannel = targetCh;
+          });
+        }
+        setState(() {
+          _numberInputBuffer = '';
+        });
+      }
+    });
+  }
+
   bool _isRedKey(KeyEvent event) {
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.f1 ||
@@ -180,6 +240,13 @@ class _GlassDrawerState extends State<GlassDrawer> {
           // Geri Tuşu: Menüyü kapatır
           if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
             widget.onClose();
+            return KeyEventResult.handled;
+          }
+
+          // Sayı Tuşları (0-9): Menü açıkken de kanala atla ve listeyi kaydır
+          final keyLabel = key.keyLabel;
+          if (RegExp(r'^[0-9]$').hasMatch(keyLabel)) {
+            _handleNumberInput(keyLabel);
             return KeyEventResult.handled;
           }
 
@@ -251,7 +318,7 @@ class _GlassDrawerState extends State<GlassDrawer> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Başlık & Logo
+                      // Başlık & Şeffaf Yeni Logo
                       Padding(
                         padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
                         child: Row(
@@ -259,124 +326,93 @@ class _GlassDrawerState extends State<GlassDrawer> {
                           children: [
                             Row(
                               children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-                                  decoration: BoxDecoration(
-                                    gradient: const LinearGradient(
-                                      colors: [TVTheme.focusCyan, TVTheme.focusBlue],
-                                    ),
-                                    borderRadius: BorderRadius.circular(5),
-                                  ),
-                                  child: const Text(
+                                Image.asset(
+                                  'assets/logo.png',
+                                  height: 26,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (context, error, stackTrace) => const Text(
                                     'AydTV',
                                     style: TextStyle(
-                                      color: Colors.black,
+                                      color: TVTheme.focusCyan,
                                       fontWeight: FontWeight.w900,
-                                      fontSize: 14,
+                                      fontSize: 18,
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
+                                const SizedBox(width: 10),
                                 const Text(
                                   'Kanallar',
                                   style: TVTheme.tvTitle,
                                 ),
                               ],
                             ),
-                            Text(
-                              '${channels.length}',
-                              style: TVTheme.tvCategory.copyWith(fontWeight: FontWeight.bold),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: TVTheme.liquidCardBg,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.white12),
+                              ),
+                              child: Text(
+                                '${channels.length}',
+                                style: const TextStyle(
+                                  color: TVTheme.focusCyan,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
                             ),
                           ],
                         ),
                       ),
 
-                      // Kategori Hapları
-                      SizedBox(
-                        height: 36,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          itemCount: _categories.length,
-                          itemBuilder: (context, idx) {
-                            final cat = _categories[idx];
-                            final isSelected = cat == _selectedCategory;
-
-                            return GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _selectedCategory = cat;
-                                  _updateFocusNodes();
-                                });
-                                WidgetsBinding.instance.addPostFrameCallback((_) {
-                                  if (!mounted) return;
-                                  if (_filteredChannels.isEmpty) {
-                                    _emptyFocusNode.requestFocus();
-                                  } else if (_channelFocusNodes.isNotEmpty) {
-                                    _channelFocusNodes[0].requestFocus();
-                                  }
-                                });
-                              },
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 120),
-                                margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: isSelected
-                                      ? TVTheme.focusCyan.withValues(alpha: 0.25)
-                                      : Colors.white.withValues(alpha: 0.04),
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                    color: isSelected ? TVTheme.focusCyan : Colors.transparent,
-                                    width: 1.0,
+                      // Kategori Başlık Çubuğu
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: TVTheme.liquidCardBg,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: TVTheme.focusCyan.withValues(alpha: 0.35),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Icon(Icons.arrow_left_rounded, color: TVTheme.focusCyan, size: 20),
+                              Expanded(
+                                child: Text(
+                                  _selectedCategory,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    letterSpacing: 0.5,
                                   ),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    cat,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                      color: isSelected ? TVTheme.focusCyan : TVTheme.textPrimary,
-                                    ),
-                                  ),
+                                  textAlign: TextAlign.center,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                            );
-                          },
+                              const Icon(Icons.arrow_right_rounded, color: TVTheme.focusCyan, size: 20),
+                            ],
+                          ),
                         ),
                       ),
 
-                      const Divider(color: Colors.white10, height: 10),
-
-                      // Kanal Listesi veya Boş Durum
+                      // Kanal Listesi
                       Expanded(
                         child: channels.isEmpty
                             ? Focus(
                                 focusNode: _emptyFocusNode,
-                                onKeyEvent: (node, event) {
-                                  if (event is! KeyDownEvent) return KeyEventResult.ignored;
-                                  if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-                                    _switchCategory(-1);
-                                    return KeyEventResult.handled;
-                                  }
-                                  if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-                                    _switchCategory(1);
-                                    return KeyEventResult.handled;
-                                  }
-                                  if (event.logicalKey == LogicalKeyboardKey.escape ||
-                                      event.logicalKey == LogicalKeyboardKey.goBack) {
-                                    widget.onClose();
-                                    return KeyEventResult.handled;
-                                  }
-                                  return KeyEventResult.ignored;
-                                },
                                 child: Center(
                                   child: Container(
-                                    margin: const EdgeInsets.all(16),
+                                    margin: const EdgeInsets.all(20),
                                     padding: const EdgeInsets.all(16),
                                     decoration: BoxDecoration(
-                                      color: Colors.white.withValues(alpha: 0.05),
+                                      color: TVTheme.liquidCardBg,
                                       borderRadius: BorderRadius.circular(12),
                                       border: Border.all(color: Colors.white12),
                                     ),
@@ -452,8 +488,8 @@ class _GlassDrawerState extends State<GlassDrawer> {
                               style: TextStyle(color: TVTheme.textSecondary, fontSize: 10),
                             ),
                             Text(
-                              'v1.0.4',
-                              style: TextStyle(color: Colors.white24, fontSize: 10),
+                              '0-9: Kanal',
+                              style: TextStyle(color: Colors.white38, fontSize: 10),
                             ),
                           ],
                         ),
@@ -463,6 +499,43 @@ class _GlassDrawerState extends State<GlassDrawer> {
                 ),
               ),
             ),
+
+            // Sayı Tuşu Girişi Göstergesi (Menü Açıkken de Görünür)
+            if (_numberInputBuffer.isNotEmpty)
+              Positioned(
+                top: 28,
+                left: drawerWidth + 24,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.85),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: TVTheme.focusCyan, width: 1.8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: TVTheme.focusCyan.withValues(alpha: 0.35),
+                        blurRadius: 14,
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.dialpad_rounded, color: TVTheme.focusCyan, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Kanal: $_numberInputBuffer',
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
