@@ -328,7 +328,7 @@ class _GlassDrawerState extends State<GlassDrawer> {
                               children: [
                                 Image.asset(
                                   'assets/logo.png',
-                                  height: 26,
+                                  height: 28,
                                   fit: BoxFit.contain,
                                   errorBuilder: (context, error, stackTrace) => const Text(
                                     'AydTV',
