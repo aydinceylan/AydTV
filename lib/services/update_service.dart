@@ -17,7 +17,7 @@ class UpdateInfo {
 }
 
 class UpdateService {
-  static const String currentVersion = '1.0.13';
+  static const String currentVersion = '1.0.14';
   static const String githubApiUrl =
       'https://api.github.com/repos/aydinceylan/AydTV/releases/latest';
   static const String _dismissedVersionKey = 'aydtv_dismissed_update_version';

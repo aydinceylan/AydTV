@@ -2,18 +2,18 @@
 
 Modern, hafif ve yüksek performanslı Android TV canlı yayın deneyimi.
 
-[![Son Sürüm](https://img.shields.io/badge/Sürüm-v1.0.13-00F5D4?style=for-the-badge&logo=android)](https://github.com/aydinceylan/AydTV/releases/latest)
-[![APK İndir](https://img.shields.io/badge/Doğrudan%20İndir-AydTV.apk-FF0055?style=for-the-badge&logo=googleplay)](https://github.com/aydinceylan/AydTV/releases/latest/download/AydTV-v1.0.13.apk)
+[![Son Sürüm](https://img.shields.io/badge/Sürüm-v1.0.14-00F5D4?style=for-the-badge&logo=android)](https://github.com/aydinceylan/AydTV/releases/latest)
+[![APK İndir](https://img.shields.io/badge/Doğrudan%20İndir-AydTV.apk-FF0055?style=for-the-badge&logo=googleplay)](https://github.com/aydinceylan/AydTV/releases/latest/download/AydTV.apk)
 
 ---
 
-## 🚀 Doğrudan İndir (APK)
+## 🚀 Doğrudan İndir (APK) - Sabit & Kalıcı Bağlantı
 
-Arkadaşlarınız ve tüm Android TV / TV Box kullanıcıları son sürümü tek tıkla indirebilir:
+Arkadaşlarınız ve tüm Android TV / TV Box kullanıcıları için **bağlantı adresi sürümler değiştikçe asla değişmez**, her zaman doğrudan en son sürümü indirir:
 
-📥 **[AydTV v1.0.13 APK İndir (Doğrudan Bağlantı)](https://github.com/aydinceylan/AydTV/releases/latest/download/AydTV-v1.0.13.apk)**
+📥 **[AydTV Sabit Son Sürüm İndir (Her Zaman En Güncel)](https://github.com/aydinceylan/AydTV/releases/latest/download/AydTV.apk)**
 
-> Alternatif olarak tüm sürümleri görmek için: [GitHub Releases Sayfası](https://github.com/aydinceylan/AydTV/releases)
+> Alternatif olarak sürüm notları ve tüm geçmiş sürümler: [GitHub Releases Sayfası](https://github.com/aydinceylan/AydTV/releases)
 
 ---
 
@@ -33,9 +33,9 @@ Arkadaşlarınız ve tüm Android TV / TV Box kullanıcıları son sürümü tek
 
 ### Yöntem 1: Downloader Uygulaması ile (En Kolay)
 1. Android TV'nizde Google Play Store'dan **Downloader by AFTVnews** uygulamasını indirin.
-2. Downloader'ı açıp arama kutusuna şu indirme linkini yazın veya tarayıcıdan GitHub Releases sayfasını açın:
+2. Downloader'ı açıp arama kutusuna şu sabit indirme linkini yazın (bu link hiç değişmez):
    ```text
-   https://github.com/aydinceylan/AydTV/releases/latest/download/AydTV-v1.0.13.apk
+   https://github.com/aydinceylan/AydTV/releases/latest/download/AydTV.apk
    ```
 3. İndirme bittiğinde **Yükle (Install)** butonuna basın.
 
