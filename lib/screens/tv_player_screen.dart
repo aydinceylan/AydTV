@@ -184,7 +184,10 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
               actions: [
                 if (!isDownloading) ...[
                   TextButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: () {
+                      _updateService.dismissUpdate(update.version);
+                      Navigator.pop(context);
+                    },
                     child: const Text('Daha Sonra', style: TextStyle(color: TVTheme.textSecondary, fontSize: 15)),
                   ),
                   ElevatedButton(
@@ -316,8 +319,8 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
   }
 
   /// Canlı Yayın Donma (Stall / Freeze) Dedektörü
-  /// Ağ dalgalanmaları veya HLS manifest tıkanmalarında yayının donmasını 3-4 saniyede
-  /// tespit eder ve kullanıcı kumandaya dokunmadan canlı uca (live edge) otomatik yeniden bağlanır.
+  /// Ağ dalgalanmaları veya HLS manifest tıkanmalarında yayının donmasını 3 saniyede
+  /// tespit eder ve kullanıcı kumandaya dokunmadan canlı uca (live edge) veya yedek hatta otomatik bağlanır.
   void _startFreezeDetector() {
     _freezeCheckTimer?.cancel();
     _stuckCounter = 0;
@@ -336,21 +339,24 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       final val = _controller!.value;
       if (!val.isInitialized) return;
 
-      // HLS canlı yayınında takılma / donma tespiti:
-      // 1) ExoPlayer uzun süre buffer bekliyor (isBuffering = true)
-      // 2) Veya oynatılıyor görünüyor ama position ilerlemiyor (ekran dondu)
-      final isFrozen = (val.isPlaying && _lastPosition != null && val.position == _lastPosition);
-      final isBufferingStuck = val.isBuffering;
+      // Canlı TV yayınında takılma / donma / durma tespiti:
+      // 1) ExoPlayer buffer bekliyor (isBuffering = true)
+      // 2) Canlı TV'de pause yapılamayacağı için video oynamıyorsa (!isPlaying) doğrudan donmadır
+      // 3) Veya position son saniyede 250ms'den daha az ilerlediyse / sabit kaldıysa (freeze)
+      final bool isNotPlaying = !val.isPlaying;
+      final bool isBuffering = val.isBuffering;
+      final bool isPositionStuck = _lastPosition != null &&
+          (val.position - _lastPosition!).inMilliseconds.abs() < 250;
 
-      if (isFrozen || isBufferingStuck) {
+      if (isNotPlaying || isBuffering || isPositionStuck) {
         _stuckCounter++;
-        // 4 saniye boyunca donuk kaldıysa otomatik canlı uca yeniden bağlan
-        if (_stuckCounter >= 4) {
+        // 3 saniye boyunca donuk kaldıysa otomatik canlı uca veya yedek hatta bağlan
+        if (_stuckCounter >= 3) {
           _stuckCounter = 0;
           _recoverStalledPlayback();
         }
       } else {
-        // Yayın akmaya devam ediyorsa sayaçları sıfırla
+        // Yayın sağlıklı akmaya devam ediyorsa sayaçları sıfırla
         _stuckCounter = 0;
         _consecutiveStalls = 0;
       }
@@ -366,15 +372,16 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     _isAutoReconnecting = true;
     _consecutiveStalls++;
 
-    _showToast('🔄 Yayın yenileniyor, canlıya bağlanılıyor...');
-
     final ch = _currentChannel!;
     final idx = _currentChannelIndex;
 
-    // Aynı hat üst üste 2 kez donarsa ve yedek link varsa sıradaki yedeğe geç
+    // Eğer yedek hatlar varsa ve yayın takıldıysa alternatif kaynağı dene
     int targetUrlIndex = 0;
     if (_consecutiveStalls >= 2 && ch.backupUrls.isNotEmpty) {
       targetUrlIndex = (_consecutiveStalls - 1) % (ch.backupUrls.length + 1);
+      _showToast('🔄 Alternatif yayına (${targetUrlIndex + 1}) bağlanılıyor...');
+    } else {
+      _showToast('🔄 Yayın yenileniyor, canlıya bağlanılıyor...');
     }
 
     _playingChannelId = null; // Mevcut controller kilidini aç

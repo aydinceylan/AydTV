@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:ota_update/ota_update.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class UpdateInfo {
   final String version;
@@ -16,9 +17,10 @@ class UpdateInfo {
 }
 
 class UpdateService {
-  static const String currentVersion = '1.0.10';
+  static const String currentVersion = '1.0.11';
   static const String githubApiUrl =
       'https://api.github.com/repos/aydinceylan/AydTV/releases/latest';
+  static const String _dismissedVersionKey = 'aydtv_dismissed_update_version';
 
   /// GitHub Releases üzerinden yeni APK olup olmadığını kontrol eder
   Future<UpdateInfo?> checkForUpdate() async {
@@ -30,8 +32,15 @@ class UpdateService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final tagName = (data['tag_name'] ?? '').toString().replaceAll('v', '');
+        final tagName = (data['tag_name'] ?? '').toString().replaceAll('v', '').trim();
         final body = data['body'] ?? '';
+
+        // Eğer kullanıcı daha önce bu sürüm için "Daha Sonra" demişse tekrar rahatsız etme
+        final prefs = await SharedPreferences.getInstance();
+        final dismissedVersion = prefs.getString(_dismissedVersionKey);
+        if (dismissedVersion == tagName) {
+          return null;
+        }
 
         if (_isNewerVersion(tagName, currentVersion)) {
           final assets = data['assets'] as List<dynamic>?;
@@ -57,6 +66,18 @@ class UpdateService {
       }
     }
     return null;
+  }
+
+  /// Kullanıcı "Daha Sonra" dediğinde aynı sürüm için tekrar diyalog açılmasını engeller
+  Future<void> dismissUpdate(String version) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_dismissedVersionKey, version);
+    } catch (e) {
+      if (kDebugMode) {
+        print('Güncelleme yoksayma hatası: $e');
+      }
+    }
   }
 
   /// Yeni APK indirme ve kurulum sürecini başlatır
