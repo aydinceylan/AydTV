@@ -103,6 +103,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _setupSystemChannelListener();
     _loadBufferSetting();
     _initializeChannels();
     _checkAppUpdates();
@@ -113,6 +114,18 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         DefaultTvDialog.checkAndShow(context);
+      }
+    });
+  }
+
+  void _setupSystemChannelListener() {
+    const MethodChannel('com.aydtv.aydtv/system').setMethodCallHandler((call) async {
+      if (call.method == 'forceStopAudio') {
+        _controller?.setVolume(0.0);
+        _controller?.pause();
+      } else if (call.method == 'resumeAudio') {
+        _controller?.setVolume(1.0);
+        _controller?.play();
       }
     });
   }
@@ -133,12 +146,15 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    // TV kumandasından Home tuşuna basıldığında veya başka uygulamaya geçildiğinde sesi kapat
+    // TV kumandasından Home tuşuna basıldığında veya başka uygulamaya geçildiğinde sesi ve yayını derhal durdur
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.hidden) {
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _controller?.setVolume(0.0);
       _controller?.pause();
     } else if (state == AppLifecycleState.resumed) {
+      _controller?.setVolume(1.0);
       _controller?.play();
     }
   }

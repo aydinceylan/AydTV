@@ -7,10 +7,14 @@ class DefaultTvDialog extends StatefulWidget {
   const DefaultTvDialog({super.key});
 
   static const String _prefKey = 'has_prompted_default_tv_v2';
+  static const String _dismissedKey = 'default_tv_prompt_dismissed_permanently';
   static const MethodChannel _channel = MethodChannel('com.aydtv.aydtv/system');
 
   static Future<void> checkAndShow(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
+    final isDismissed = prefs.getBool(_dismissedKey) ?? false;
+    if (isDismissed) return;
+
     final hasPrompted = prefs.getBool(_prefKey) ?? false;
     if (!hasPrompted) {
       await prefs.setBool(_prefKey, true);
@@ -79,6 +83,11 @@ class _DefaultTvDialogState extends State<DefaultTvDialog> with WidgetsBindingOb
     try {
       await DefaultTvDialog._channel.invokeMethod('openAccessibilitySettings');
     } catch (_) {}
+  }
+
+  Future<void> _dismissPermanently() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(DefaultTvDialog._dismissedKey, true);
   }
 
   @override
@@ -233,7 +242,10 @@ class _DefaultTvDialogState extends State<DefaultTvDialog> with WidgetsBindingOb
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: () {
+                    _dismissPermanently();
+                    Navigator.of(context).pop();
+                  },
                   child: Text(
                     _isEnabled ? 'Kapat' : 'Daha Sonra',
                     style: const TextStyle(color: TVTheme.textSecondary, fontSize: 14),
@@ -250,6 +262,7 @@ class _DefaultTvDialogState extends State<DefaultTvDialog> with WidgetsBindingOb
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                     onPressed: () {
+                      _dismissPermanently();
                       _openSettings();
                     },
                     child: const Text(
@@ -266,7 +279,10 @@ class _DefaultTvDialogState extends State<DefaultTvDialog> with WidgetsBindingOb
                       padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () {
+                      _dismissPermanently();
+                      Navigator.of(context).pop();
+                    },
                     child: const Text(
                       'Tamam, Harika',
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),

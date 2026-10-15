@@ -94,6 +94,33 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         setKeepScreenOn()
+        try {
+            flutterEngine?.dartExecutor?.binaryMessenger?.let {
+                MethodChannel(it, CHANNEL).invokeMethod("resumeAudio", null)
+            }
+        } catch (e: Exception) {}
+    }
+
+    override fun onPause() {
+        super.onPause()
+        try {
+            val audioManager = getSystemService(AUDIO_SERVICE) as? android.media.AudioManager
+            audioManager?.abandonAudioFocus(null)
+            flutterEngine?.dartExecutor?.binaryMessenger?.let {
+                MethodChannel(it, CHANNEL).invokeMethod("forceStopAudio", null)
+            }
+        } catch (e: Exception) {}
+    }
+
+    override fun onStop() {
+        super.onStop()
+        try {
+            val audioManager = getSystemService(AUDIO_SERVICE) as? android.media.AudioManager
+            audioManager?.abandonAudioFocus(null)
+            flutterEngine?.dartExecutor?.binaryMessenger?.let {
+                MethodChannel(it, CHANNEL).invokeMethod("forceStopAudio", null)
+            }
+        } catch (e: Exception) {}
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
