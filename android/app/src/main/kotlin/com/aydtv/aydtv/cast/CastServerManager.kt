@@ -137,13 +137,13 @@ class CastServerManager(
             val mac = getMacAddress()
             val macNoColon = mac.replace(":", "")
 
-            // 1. Standart AirPlay Servisi (Tüm iOS cihazlarıyla uyumlu şifresiz HLS & Video & Fotoğraf)
+            // 1. Standart AirPlay Servisi (Tüm iOS cihazlarıyla uyumlu Ekran Yansıtma, HLS Video & Fotoğraf)
             val airplayService = NsdServiceInfo().apply {
                 serviceName = deviceName
                 serviceType = "_airplay._tcp"
                 port = AIRPLAY_PORT
                 setAttribute("deviceid", mac)
-                setAttribute("features", "0x39F7") // Video + Photo + Slideshow (FairPlay DRM kısıtlaması olmadan açık oynatma)
+                setAttribute("features", "0x5A7FFFF7,0x1E") // Ekran Yansıtma (Mirroring) + Video + Photo + Slideshow
                 setAttribute("model", "AppleTV3,1")
                 setAttribute("srcvers", "220.68")
                 setAttribute("protovers", "1.0")
@@ -211,8 +211,9 @@ class CastServerManager(
                 if (requestLine.isBlank()) continue
 
                 val parts = requestLine.split(" ")
-                val method = if (parts.isNotEmpty()) parts[0] else "GET"
+                val method = if (parts.isNotEmpty()) parts[0].uppercase() else "GET"
                 val path = if (parts.size > 1) parts[1] else "/"
+                val isRtsp = requestLine.contains("RTSP") || parts.getOrNull(2)?.contains("RTSP") == true
 
                 val headers = mutableMapOf<String, String>()
                 var contentLength = 0
@@ -256,7 +257,13 @@ class CastServerManager(
                     notifyDeviceConnected(clientName, "airplay")
                 }
 
-                handleAirplayRequest(method, path, headers, body, output)
+                val cseq = headers["cseq"] ?: "0"
+
+                if (isRtsp) {
+                    handleRtspRequest(method, path, headers, body, output, cseq, clientName)
+                } else {
+                    handleAirplayHttpRequest(method, path, headers, body, output, cseq, clientName)
+                }
             }
         } catch (_: Exception) {
         } finally {
@@ -265,14 +272,96 @@ class CastServerManager(
         }
     }
 
-    private fun handleAirplayRequest(
+    private fun handleRtspRequest(
         method: String,
         path: String,
         headers: Map<String, String>,
         body: String,
-        output: OutputStream
+        output: OutputStream,
+        cseq: String,
+        clientName: String
     ) {
-        val cseq = headers["cseq"]
+        when (method) {
+            "OPTIONS" -> {
+                val resp = "RTSP/1.0 200 OK\r\n" +
+                        "CSeq: $cseq\r\n" +
+                        "Server: AirTunes/220.68\r\n" +
+                        "Public: ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, TEARDOWN, OPTIONS, GET_PARAMETER, SET_PARAMETER, POST, GET, PUT\r\n\r\n"
+                output.write(resp.toByteArray(Charsets.UTF_8))
+                output.flush()
+            }
+            "ANNOUNCE" -> {
+                notifyDeviceConnected(clientName, "airplay")
+                val resp = "RTSP/1.0 200 OK\r\n" +
+                        "CSeq: $cseq\r\n" +
+                        "Server: AirTunes/220.68\r\n\r\n"
+                output.write(resp.toByteArray(Charsets.UTF_8))
+                output.flush()
+            }
+            "SETUP" -> {
+                // iPhone Ekran Yansıtma akışı başladı!
+                notifyMediaStarted("screen", "", "Ekran Yansıtma", clientName, deviceName)
+                val transport = headers["transport"] ?: "RTP/AVP/TCP;unicast;interleaved=0-1;mode=record"
+                val resp = "RTSP/1.0 200 OK\r\n" +
+                        "CSeq: $cseq\r\n" +
+                        "Server: AirTunes/220.68\r\n" +
+                        "Transport: $transport\r\n" +
+                        "Session: 1\r\n\r\n"
+                output.write(resp.toByteArray(Charsets.UTF_8))
+                output.flush()
+            }
+            "RECORD" -> {
+                val resp = "RTSP/1.0 200 OK\r\n" +
+                        "CSeq: $cseq\r\n" +
+                        "Server: AirTunes/220.68\r\n" +
+                        "Session: 1\r\n\r\n"
+                output.write(resp.toByteArray(Charsets.UTF_8))
+                output.flush()
+            }
+            "GET_PARAMETER", "SET_PARAMETER" -> {
+                val resp = "RTSP/1.0 200 OK\r\n" +
+                        "CSeq: $cseq\r\n" +
+                        "Server: AirTunes/220.68\r\n\r\n"
+                output.write(resp.toByteArray(Charsets.UTF_8))
+                output.flush()
+            }
+            "TEARDOWN" -> {
+                val resp = "RTSP/1.0 200 OK\r\n" +
+                        "CSeq: $cseq\r\n" +
+                        "Server: AirTunes/220.68\r\n\r\n"
+                output.write(resp.toByteArray(Charsets.UTF_8))
+                output.flush()
+                notifyMediaStopped()
+                notifyDeviceDisconnected()
+            }
+            "POST" -> {
+                val resp = "RTSP/1.0 200 OK\r\n" +
+                        "CSeq: $cseq\r\n" +
+                        "Server: AirTunes/220.68\r\n" +
+                        "Content-Type: application/octet-stream\r\n" +
+                        "Content-Length: 1\r\n\r\n\u0001"
+                output.write(resp.toByteArray(Charsets.UTF_8))
+                output.flush()
+            }
+            else -> {
+                val resp = "RTSP/1.0 200 OK\r\n" +
+                        "CSeq: $cseq\r\n" +
+                        "Server: AirTunes/220.68\r\n\r\n"
+                output.write(resp.toByteArray(Charsets.UTF_8))
+                output.flush()
+            }
+        }
+    }
+
+    private fun handleAirplayHttpRequest(
+        method: String,
+        path: String,
+        headers: Map<String, String>,
+        body: String,
+        output: OutputStream,
+        cseq: String,
+        clientName: String
+    ) {
         when {
             path.startsWith("/server-info") || path.startsWith("/info") -> {
                 val mac = getMacAddress()
@@ -305,14 +394,14 @@ class CastServerManager(
                 if (streamUrl.contains(".mp3") || streamUrl.contains(".m4a") || streamUrl.contains(".flac") || streamUrl.contains(".aac")) {
                     mediaType = "audio"
                 }
-                notifyMediaStarted(mediaType, streamUrl, "AirPlay Medyası", "Apple Cihazı", deviceName)
+                notifyMediaStarted(mediaType, streamUrl, "AirPlay Medyası", clientName, deviceName)
                 sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
             }
             path.startsWith("/photo") -> {
                 try {
                     val photoFile = File(context.cacheDir, "airplay_photo.jpg")
                     photoFile.writeBytes(body.toByteArray(Charsets.ISO_8859_1))
-                    notifyMediaStarted("photo", photoFile.absolutePath, "AirPlay Fotoğrafı", "Apple Cihazı", deviceName)
+                    notifyMediaStarted("photo", photoFile.absolutePath, "AirPlay Fotoğrafı", clientName, deviceName)
                 } catch (_: Exception) {}
                 sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
             }

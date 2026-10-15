@@ -10,13 +10,16 @@ import urllib.error
 REPO = "aydinceylan/AydTV"
 TAG = "v1.2.0"
 RELEASE_NAME = "AydTV v1.2.0 - Yeni Çift Panelli Ayarlar, Kanal Sıralama, Web Kumanda & Uyku Zamanlayıcı"
-COMMIT_HASH = "94d9dbd"
+COMMIT_HASH = "237ecf6"
 RELEASE_NOTES = """## AydTV v1.2.0 Yenilikleri
 - 🎨 **Baştan Aşağı Yenilenen Çift Panelli Ayarlar Arayüzü:** 55" TV ekranları için özel tasarlanmış, sekmeli, modern cam efektli ve çok ferah yeni ayarlar menüsü.
 - 🔢 **Kumanda ile Kolay Kanal Sıralama:** Ayarlar içerisinden istenilen kanalı OK ile seçip kumandanın Yukarı/Aşağı tuşlarıyla sırasını değiştirme ve kilitli kaydetme özelliği.
 - 📲 **Telefondan Akıllı TV Kumandası (Web Remote):** Sıfır uygulama yükleme! TV'deki yerel ağ adresini (`http://192.168.1.X:8088`) telefonun tarayıcısından açarak telefonu dokunmatik titreşimli bir TV kumandasına dönüştürme.
-- ⏱️ **Uyku Zamanlayıcısı (Sleep Timer):** 15, 30, 45, 60, 90 ve 120 dakika seçenekleriyle gece TV karşısında uyuyakalanlar için yayını otomatik durduran ve ekranı kapatan akıllı zamanlayıcı.
-- 🍏 **AirPlay CSeq & Şifresiz Akış Düzeltmesi:** iOS 15-18 cihazlarında görülen AirPlay el sıkışma zaman aşımı düzeltildi, standart HLS/Photo protokolü etkinleştirildi.
+  - 🎮 Kumanda: D-Pad, ses rocker, kanal rocker, geri, play/pause.
+  - ⌨️ Klavye: Telefondan doğrudan TV'ye metin gönderme.
+  - 📺 Kanallar: Telefondan tek dokunuşla TV'de kanal açma ve favori yıldızı.
+  - ⏱️ Uyku: 15, 30, 45, 60, 90, 120 dk uyku zamanlayıcı kurma.
+- 🍏 **AirPlay Video, Fotoğraf & Müzik:** Modern AppleTV3,1 ve features=0x39F7 ile video akışı ve galeri fotoğraflarını TV'ye yansıtma.
 """
 
 # GitHub Token al

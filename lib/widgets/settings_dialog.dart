@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/channel.dart';
 import '../services/cast_service.dart';
@@ -205,12 +206,21 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
                         const Spacer(),
 
-                        // Çıkış Butonu
                         Focus(
+                          onKeyEvent: (node, event) {
+                            if (event is KeyDownEvent) {
+                              final key = event.logicalKey;
+                              if (key == LogicalKeyboardKey.select || key == LogicalKeyboardKey.enter) {
+                                Navigator.of(context).pop();
+                                return KeyEventResult.handled;
+                              }
+                            }
+                            return KeyEventResult.ignored;
+                          },
                           child: Builder(
                             builder: (context) {
                               final isFocused = Focus.of(context).hasFocus;
-                              return InkWell(
+                              return GestureDetector(
                                 onTap: () => Navigator.of(context).pop(),
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
@@ -260,10 +270,16 @@ class _SettingsDialogState extends State<SettingsDialog> {
     final isSelected = _selectedTab == index;
     return Focus(
       autofocus: index == 0,
+      onFocusChange: (hasFocus) {
+        if (hasFocus) {
+          setState(() => _selectedTab = index);
+        }
+      },
       onKeyEvent: (node, event) {
-        if (event.runtimeType.toString().contains('KeyDownEvent')) {
-          final keyName = event.logicalKey.debugName ?? '';
-          if (keyName.contains('Enter') || keyName.contains('Select')) {
+        if (event is KeyDownEvent) {
+          final key = event.logicalKey;
+          if (key == LogicalKeyboardKey.select ||
+              key == LogicalKeyboardKey.enter) {
             setState(() => _selectedTab = index);
             return KeyEventResult.handled;
           }
@@ -273,7 +289,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
       child: Builder(
         builder: (context) {
           final isFocused = Focus.of(context).hasFocus;
-          return InkWell(
+          return GestureDetector(
             onTap: () => setState(() => _selectedTab = index),
             child: Container(
               margin: const EdgeInsets.symmetric(vertical: 4),
