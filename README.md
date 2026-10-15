@@ -2,7 +2,7 @@
 
 Modern, hafif ve yüksek performanslı Android TV canlı yayın deneyimi.
 
-[![Son Sürüm](https://img.shields.io/badge/Sürüm-v1.0.16-00F5D4?style=for-the-badge&logo=android)](https://github.com/aydinceylan/AydTV/releases/latest)
+[![Son Sürüm](https://img.shields.io/badge/Sürüm-v1.0.17-00F5D4?style=for-the-badge&logo=android)](https://github.com/aydinceylan/AydTV/releases/latest)
 [![APK İndir](https://img.shields.io/badge/Doğrudan%20İndir-AydTV.apk-FF0055?style=for-the-badge&logo=googleplay)](https://github.com/aydinceylan/AydTV/releases/latest/download/AydTV.apk)
 
 ---

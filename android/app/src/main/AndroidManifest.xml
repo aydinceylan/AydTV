@@ -40,6 +40,30 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+
+            <!-- Kumandadaki TV Tuşu & Android TV Canlı Yayın Alıcısı -->
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:host="android.media.tv" />
+            </intent-filter>
+
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="vnd.android.cursor.item/channel" />
+                <data android:mimeType="vnd.android.cursor.dir/channel" />
+                <data android:mimeType="vnd.android.cursor.item/program" />
+            </intent-filter>
+
+            <!-- Arçelik, Vestel, Philips, TCL vb. OEM Açılış & TV Tuşu Intentleri -->
+            <intent-filter android:priority="1000">
+                <action android:name="com.android.tv.action.FORCE_LAUNCH_ON_BOOT" />
+                <action android:name="com.android.tv.action.VIEW_INPUTS" />
+                <action android:name="android.intent.action.SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <!-- TV Açıldığında Otomatik Başlatma Alıcısı -->

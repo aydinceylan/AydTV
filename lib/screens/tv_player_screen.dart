@@ -10,6 +10,7 @@ import '../services/channel_service.dart';
 import '../services/epg_service.dart';
 import '../services/update_service.dart';
 import '../theme/tv_theme.dart';
+import '../widgets/default_tv_dialog.dart';
 import '../widgets/glass_drawer.dart';
 import '../widgets/quick_zapping_bar.dart';
 import '../widgets/settings_dialog.dart';
@@ -108,6 +109,11 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     _startFreezeDetector();
     _epgUpdateTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        DefaultTvDialog.checkAndShow(context);
+      }
     });
   }
 

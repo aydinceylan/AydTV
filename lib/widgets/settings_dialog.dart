@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/tv_theme.dart';
 import '../services/update_service.dart';
+import 'default_tv_dialog.dart';
 
 class SettingsDialog extends StatefulWidget {
   final VoidCallback? onCheckUpdate;
@@ -33,6 +34,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
   final FocusNode _closeFocusNode = FocusNode();
   final FocusNode _bufferFocusNode = FocusNode();
+  final FocusNode _defaultTvFocusNode = FocusNode();
   final FocusNode _bootFocusNode = FocusNode();
   final FocusNode _screenFocusNode = FocusNode();
   final FocusNode _bgAudioFocusNode = FocusNode();
@@ -48,6 +50,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
   void dispose() {
     _closeFocusNode.dispose();
     _bufferFocusNode.dispose();
+    _defaultTvFocusNode.dispose();
     _bootFocusNode.dispose();
     _screenFocusNode.dispose();
     _bgAudioFocusNode.dispose();
@@ -408,7 +411,62 @@ class _SettingsDialogState extends State<SettingsDialog> {
                       },
                     ),
 
-                    const SizedBox(height: 12),
+                    // 5. Varsayılan TV Yapma Rehberi Butonu
+                    Focus(
+                      focusNode: _defaultTvFocusNode,
+                      onKeyEvent: (node, event) {
+                        if (event.runtimeType.toString().contains('KeyDownEvent')) {
+                          final keyName = event.logicalKey.debugName ?? '';
+                          if (keyName.contains('Enter') || keyName.contains('Select')) {
+                            Navigator.of(context).pop();
+                            DefaultTvDialog.show(context);
+                            return KeyEventResult.handled;
+                          }
+                        }
+                        return KeyEventResult.ignored;
+                      },
+                      child: Builder(
+                        builder: (context) {
+                          final isFocused = Focus.of(context).hasFocus;
+                          return InkWell(
+                            onTap: () {
+                              Navigator.of(context).pop();
+                              DefaultTvDialog.show(context);
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: isFocused ? TVTheme.focusCyan : Colors.white.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isFocused ? Colors.white : TVTheme.focusCyan.withValues(alpha: 0.4),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.live_tv_rounded,
+                                    color: isFocused ? Colors.black : TVTheme.focusCyan,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    '📺 TV Tuşunu AydTV\'ye Ata (Varsayılan TV Rehberi)',
+                                    style: TextStyle(
+                                      color: isFocused ? Colors.black : Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
 
                     // Güncelleme Kontrolü Butonu
                     Focus(
