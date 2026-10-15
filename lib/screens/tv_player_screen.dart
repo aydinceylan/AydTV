@@ -14,6 +14,10 @@ import '../widgets/default_tv_dialog.dart';
 import '../widgets/glass_drawer.dart';
 import '../widgets/quick_zapping_bar.dart';
 import '../widgets/settings_dialog.dart';
+import '../services/cast_service.dart';
+import '../widgets/cast_toast.dart';
+import '../widgets/cast_music_view.dart';
+import '../widgets/cast_disconnect_dialog.dart';
 
 class TVPlayerScreen extends StatefulWidget {
   const TVPlayerScreen({super.key});
@@ -37,6 +41,15 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   bool _isLoading = true;
   bool _hasError = false;
   String _errorMessage = '';
+
+  // Kablosuz Ekran ve Ses Paylaşımı (AirPlay & DLNA)
+  final CastService _castService = CastService();
+  bool _isCasting = false;
+  bool _isCastPlaying = true;
+  String? _connectedCastDevice;
+  String _castType = 'airplay';
+  CastMediaInfo? _currentCastMedia;
+  bool _showCastToast = false;
 
   // Eşzamanlılık / Yarış Durumu (Race Condition) Önleyici İstek Kimliği
   int _playRequestId = 0;
@@ -104,6 +117,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _setupSystemChannelListener();
+    _setupCastListener();
     _loadBufferSetting();
     _initializeChannels();
     _checkAppUpdates();
@@ -116,6 +130,65 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
         DefaultTvDialog.checkAndShow(context);
       }
     });
+  }
+
+  void _setupCastListener() {
+    _castService.initialize();
+
+    _castService.onDeviceConnected = (deviceName, type) {
+      if (!mounted) return;
+      setState(() {
+        _connectedCastDevice = deviceName;
+        _castType = type;
+        _showCastToast = true;
+      });
+    };
+
+    _castService.onDeviceDisconnected = () {
+      if (!mounted) return;
+      setState(() {
+        _isCasting = false;
+        _currentCastMedia = null;
+        _connectedCastDevice = null;
+        _showCastToast = false;
+      });
+      // Canlı TV yayınını tekrar başlat
+      _controller?.setVolume(1.0);
+      _controller?.play();
+    };
+
+    _castService.onMediaStarted = (media) {
+      if (!mounted) return;
+      setState(() {
+        _isCasting = true;
+        _isCastPlaying = true;
+        _currentCastMedia = media;
+      });
+      // Canlı TV yayınını duraklat ve sesini kes
+      _controller?.setVolume(0.0);
+      _controller?.pause();
+    };
+
+    _castService.onMediaStopped = () {
+      if (!mounted) return;
+      setState(() {
+        _isCasting = false;
+        _currentCastMedia = null;
+      });
+      // Canlı TV yayınını kaldığı yerden devam ettir
+      _controller?.setVolume(1.0);
+      _controller?.play();
+    };
+
+    _castService.onMediaPaused = () {
+      if (!mounted) return;
+      setState(() => _isCastPlaying = false);
+    };
+
+    _castService.onMediaResumed = () {
+      if (!mounted) return;
+      setState(() => _isCastPlaying = true);
+    };
   }
 
   void _setupSystemChannelListener() {
@@ -669,6 +742,54 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
 
     final key = event.logicalKey;
 
+    // Ekran Paylaşımı (AirPlay / DLNA) Aktifken Kumanda Yönetimi
+    if (_isCasting) {
+      // 1. Geri Tuşu: TV Yayınına Dönüş Onay Diyaloğu
+      if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
+        CastDisconnectDialog.show(
+          context,
+          deviceName: _connectedCastDevice,
+          onConfirm: () {
+            _castService.disconnect();
+          },
+        );
+        return KeyEventResult.handled;
+      }
+
+      // 2. OK / Select / PlayPause: Duraklat / Oynat
+      if (key == LogicalKeyboardKey.select ||
+          key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.space ||
+          key == LogicalKeyboardKey.mediaPlayPause ||
+          key == LogicalKeyboardKey.mediaPlay ||
+          key == LogicalKeyboardKey.mediaPause) {
+        if (_isCastPlaying) {
+          _castService.sendPause();
+          _showToast('⏸️ Duraklatıldı');
+        } else {
+          _castService.sendPlay();
+          _showToast('▶️ Oynatılıyor');
+        }
+        return KeyEventResult.handled;
+      }
+
+      // 3. Sağ Tuş / İleri Sar: 10 sn İleri
+      if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.mediaFastForward) {
+        _castService.sendSeek(10);
+        _showToast('⏩ 10 sn İleri');
+        return KeyEventResult.handled;
+      }
+
+      // 4. Sol Tuş / Geri Sar: 10 sn Geri
+      if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
+        _castService.sendSeek(-10);
+        _showToast('⏪ 10 sn Geri');
+        return KeyEventResult.handled;
+      }
+
+      return KeyEventResult.handled; // Yayına tuş kaçmasını engelle
+    }
+
     // Info Tuşu: Banner HUD'u her zaman açar / gösterir
     if (_isInfoKey(event)) {
       _triggerZappingBar();
@@ -800,6 +921,17 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
+        // Ekran paylaşımı aktifse onay sorup TV yayınına dön
+        if (_isCasting) {
+          CastDisconnectDialog.show(
+            context,
+            deviceName: _connectedCastDevice,
+            onConfirm: () {
+              _castService.disconnect();
+            },
+          );
+          return;
+        }
         // Menü açıksa SADECE menüyü kapat, kesinlikle uygulamadan çıkma!
         if (_isDrawerOpen) {
           _closeDrawer();
@@ -954,6 +1086,71 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
                   onOpenSettings: () {
                     _closeDrawer();
                     _openSettingsDialog();
+                  },
+                ),
+
+              // 5. EKRAN PAYLAŞIMI / MÜZİK MODU KATMANI
+              if (_isCasting)
+                Positioned.fill(
+                  child: _currentCastMedia?.isAudioOnly == true
+                      ? CastMusicView(
+                          media: _currentCastMedia!,
+                          deviceName: _connectedCastDevice,
+                          isPlaying: _isCastPlaying,
+                          onTogglePlay: () {
+                            if (_isCastPlaying) {
+                              _castService.sendPause();
+                            } else {
+                              _castService.sendPlay();
+                            }
+                          },
+                          onSeekForward: () => _castService.sendSeek(10),
+                          onSeekBackward: () => _castService.sendSeek(-10),
+                          onDisconnect: () => _castService.disconnect(),
+                        )
+                      : Container(
+                          color: Colors.black,
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.airplay_rounded, size: 88, color: TVTheme.focusCyan),
+                                const SizedBox(height: 20),
+                                Text(
+                                  '📱 ${_connectedCastDevice ?? "Apple / Android Cihazı"}',
+                                  style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'Kablosuz Ekran Yansıtılıyor (1080p 60 FPS)',
+                                  style: TextStyle(color: TVTheme.focusCyan, fontSize: 16),
+                                ),
+                                const SizedBox(height: 28),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white12,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: Colors.white24),
+                                  ),
+                                  child: const Text(
+                                    'TV Yayınına dönmek için kumandadan GERİ tuşuna basın',
+                                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                ),
+
+              // 6. İLK BAĞLANTI BİLDİRİMİ (Floating Toast)
+              if (_showCastToast && _connectedCastDevice != null)
+                CastToast(
+                  deviceName: _connectedCastDevice!,
+                  type: _castType,
+                  onDismissed: () {
+                    if (mounted) setState(() => _showCastToast = false);
                   },
                 ),
             ],

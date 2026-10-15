@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/tv_theme.dart';
 import '../services/update_service.dart';
+import '../services/cast_service.dart';
 import 'default_tv_dialog.dart';
 
 class SettingsDialog extends StatefulWidget {
@@ -29,6 +30,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
   bool _autoStartOnBoot = true;
   bool _keepScreenOn = true;
   bool _muteOnBackground = true;
+  bool _castEnabled = true;
+  bool _castPinEnabled = false;
   String _bufferMode = 'balanced'; // 'ultra', 'balanced', 'shield'
   bool _isLoading = true;
 
@@ -38,6 +41,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
   final FocusNode _bootFocusNode = FocusNode();
   final FocusNode _screenFocusNode = FocusNode();
   final FocusNode _bgAudioFocusNode = FocusNode();
+  final FocusNode _castFocusNode = FocusNode();
+  final FocusNode _castPinFocusNode = FocusNode();
   final FocusNode _updateFocusNode = FocusNode();
 
   @override
@@ -54,6 +59,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _bootFocusNode.dispose();
     _screenFocusNode.dispose();
     _bgAudioFocusNode.dispose();
+    _castFocusNode.dispose();
+    _castPinFocusNode.dispose();
     _updateFocusNode.dispose();
     super.dispose();
   }
@@ -64,6 +71,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
       _autoStartOnBoot = prefs.getBool('auto_start_on_boot') ?? true;
       _keepScreenOn = prefs.getBool('keep_screen_on') ?? true;
       _muteOnBackground = prefs.getBool('mute_on_background') ?? true;
+      _castEnabled = prefs.getBool('cast_enabled') ?? true;
+      _castPinEnabled = prefs.getBool('cast_pin_enabled') ?? false;
       _bufferMode = prefs.getString('buffer_mode') ?? 'balanced';
       _isLoading = false;
     });
@@ -75,6 +84,17 @@ class _SettingsDialogState extends State<SettingsDialog> {
       await prefs.setBool(key, value);
     } else if (value is String) {
       await prefs.setString(key, value);
+    }
+    if (key == 'cast_enabled') {
+      if (value == true) {
+        CastService().startServer(pinEnabled: _castPinEnabled);
+      } else {
+        CastService().stopServer();
+      }
+    } else if (key == 'cast_pin_enabled') {
+      if (_castEnabled) {
+        CastService().startServer(pinEnabled: value == true);
+      }
     }
     widget.onSettingsChanged?.call();
   }
@@ -410,6 +430,33 @@ class _SettingsDialogState extends State<SettingsDialog> {
                         _saveSetting('mute_on_background', val);
                       },
                     ),
+
+                    // 5. Kablosuz Ekran Paylaşımı (AirPlay & DLNA)
+                    _buildSettingTile(
+                      focusNode: _castFocusNode,
+                      icon: Icons.airplay_rounded,
+                      title: 'Kablosuz Ekran Paylaşımı (AirPlay & DLNA)',
+                      subtitle: 'iPhone, iPad, Mac ve Android telefonlardan TV\'ye yansıtmayı aktif eder.',
+                      value: _castEnabled,
+                      onChanged: (val) {
+                        setState(() => _castEnabled = val);
+                        _saveSetting('cast_enabled', val);
+                      },
+                    ),
+
+                    // 6. AirPlay PIN Kodu Güvenliği
+                    if (_castEnabled)
+                      _buildSettingTile(
+                        focusNode: _castPinFocusNode,
+                        icon: Icons.lock_outline_rounded,
+                        title: 'AirPlay PIN Kodu Koruması',
+                        subtitle: 'İlk kez bağlanan cihazlardan TV ekranında rastgele 4 haneli kod ister.',
+                        value: _castPinEnabled,
+                        onChanged: (val) {
+                          setState(() => _castPinEnabled = val);
+                          _saveSetting('cast_pin_enabled', val);
+                        },
+                      ),
 
                     // 5. Varsayılan TV Yapma Rehberi Butonu
                     Focus(

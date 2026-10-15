@@ -14,6 +14,8 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.aydtv.aydtv/system"
+    private val CAST_CHANNEL = "com.aydtv.aydtv/cast"
+    private var castServerManager: com.aydtv.aydtv.cast.CastServerManager? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,6 +60,34 @@ class MainActivity : FlutterActivity() {
                 }
                 "isAccessibilityEnabled" -> {
                     result.success(isAccessibilityServiceEnabled())
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
+
+        // AirPlay & DLNA / Smart View Kanalı
+        val castChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CAST_CHANNEL)
+        castServerManager = com.aydtv.aydtv.cast.CastServerManager(this, castChannel)
+
+        castChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startServer" -> {
+                    val name = call.argument<String>("deviceName") ?: "AydTV"
+                    val isPin = call.argument<Boolean>("pinEnabled") ?: false
+                    castServerManager?.start(name, isPin)
+                    result.success(true)
+                }
+                "stopServer" -> {
+                    castServerManager?.stop()
+                    result.success(true)
+                }
+                "sendRemoteCommand" -> {
+                    val action = call.argument<String>("action") ?: "play"
+                    val value = call.argument<Any>("value")
+                    castServerManager?.sendRemoteCommand(action, value)
+                    result.success(true)
                 }
                 else -> {
                     result.notImplemented()
@@ -148,5 +178,10 @@ class MainActivity : FlutterActivity() {
             WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
             WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
         )
+    }
+
+    override fun onDestroy() {
+        castServerManager?.stop()
+        super.onDestroy()
     }
 }

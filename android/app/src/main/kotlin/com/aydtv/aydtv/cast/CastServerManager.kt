@@ -1,0 +1,438 @@
+package com.aydtv.aydtv.cast
+
+import android.content.Context
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
+import android.os.Handler
+import android.os.Looper
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import java.io.*
+import java.net.*
+import java.util.concurrent.Executors
+
+class CastServerManager(
+    private val context: Context,
+    private val channel: MethodChannel
+) {
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val executor = Executors.newCachedThreadPool()
+
+    private var nsdManager: NsdManager? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
+
+    private var airplayServerSocket: ServerSocket? = null
+    private var dlnaServerSocket: ServerSocket? = null
+
+    private var isRunning = false
+    private var deviceName = "AydTV"
+    private var pinEnabled = false
+    private var activeClientSocket: Socket? = null
+
+    companion object {
+        const val AIRPLAY_PORT = 7000
+        const val RAOP_PORT = 5000
+        const val DLNA_PORT = 8088
+    }
+
+    fun start(customName: String = "AydTV", isPinRequired: Boolean = false) {
+        if (isRunning) return
+        isRunning = true
+        deviceName = customName
+        pinEnabled = isPinRequired
+
+        acquireMulticastLock()
+        startAirplayServer()
+        startDlnaServer()
+        registerMdnsServices()
+    }
+
+    fun stop() {
+        if (!isRunning) return
+        isRunning = false
+
+        unregisterMdnsServices()
+        releaseMulticastLock()
+
+        try {
+            activeClientSocket?.close()
+            airplayServerSocket?.close()
+            dlnaServerSocket?.close()
+        } catch (_: Exception) {}
+
+        activeClientSocket = null
+        airplayServerSocket = null
+        dlnaServerSocket = null
+    }
+
+    private fun acquireMulticastLock() {
+        try {
+            val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            multicastLock = wifi?.createMulticastLock("AydTV_MulticastLock")?.apply {
+                setReferenceCounted(true)
+                acquire()
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun releaseMulticastLock() {
+        try {
+            if (multicastLock?.isHeld == true) {
+                multicastLock?.release()
+            }
+        } catch (_: Exception) {}
+        multicastLock = null
+    }
+
+    private fun getMacAddress(): String {
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val nif = interfaces.nextElement()
+                if (nif.name.contains("wlan") || nif.name.contains("eth")) {
+                    val mac = nif.hardwareAddress
+                    if (mac != null && mac.isNotEmpty()) {
+                        return mac.joinToString(":") { String.format("%02X", it) }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return "00:11:22:33:44:55"
+    }
+
+    private fun registerMdnsServices() {
+        try {
+            nsdManager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
+            val mac = getMacAddress()
+            val macNoColon = mac.replace(":", "")
+
+            // 1. AirPlay Video & Mirroring Servisi
+            val airplayService = NsdServiceInfo().apply {
+                serviceName = deviceName
+                serviceType = "_airplay._tcp"
+                port = AIRPLAY_PORT
+                setAttribute("deviceid", mac)
+                setAttribute("features", "0x5A7FFFF7,0x1E")
+                setAttribute("model", "AppleTV3,2")
+                setAttribute("srcvers", "220.68")
+                setAttribute("flags", "0x4")
+                setAttribute("vv", "2")
+            }
+
+            nsdManager?.registerService(airplayService, NsdManager.PROTOCOL_DNS_SD, object : NsdManager.RegistrationListener {
+                override fun onServiceRegistered(serviceInfo: NsdServiceInfo?) {}
+                override fun onRegistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
+                override fun onServiceUnregistered(serviceInfo: NsdServiceInfo?) {}
+                override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
+            })
+
+            // 2. RAOP (AirPlay Audio - Müzik) Servisi
+            val raopService = NsdServiceInfo().apply {
+                serviceName = "${macNoColon}@$deviceName"
+                serviceType = "_raop._tcp"
+                port = RAOP_PORT
+                setAttribute("ch", "2")
+                setAttribute("cn", "0,1,2,3")
+                setAttribute("et", "0,1")
+                setAttribute("sr", "44100")
+                setAttribute("ss", "16")
+                setAttribute("tp", "TCP,UDP")
+                setAttribute("vn", "65537")
+            }
+
+            nsdManager?.registerService(raopService, NsdManager.PROTOCOL_DNS_SD, object : NsdManager.RegistrationListener {
+                override fun onServiceRegistered(serviceInfo: NsdServiceInfo?) {}
+                override fun onRegistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
+                override fun onServiceUnregistered(serviceInfo: NsdServiceInfo?) {}
+                override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
+            })
+        } catch (_: Exception) {}
+    }
+
+    private fun unregisterMdnsServices() {
+        try {
+            // NsdManager servisleri uygulama kapandığında veya durdurulduğunda temizlenir
+        } catch (_: Exception) {}
+    }
+
+    private fun startAirplayServer() {
+        executor.execute {
+            try {
+                airplayServerSocket = ServerSocket(AIRPLAY_PORT).apply {
+                    reuseAddress = true
+                }
+                while (isRunning && airplayServerSocket?.isClosed == false) {
+                    val client = airplayServerSocket?.accept() ?: break
+                    executor.execute { handleAirplayClient(client) }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun handleAirplayClient(socket: Socket) {
+        activeClientSocket = socket
+        try {
+            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+            val output = socket.getOutputStream()
+
+            var deviceDetected = false
+            var clientName = "Apple Cihazı"
+
+            while (isRunning && !socket.isClosed) {
+                val requestLine = reader.readLine() ?: break
+                if (requestLine.isBlank()) continue
+
+                val parts = requestLine.split(" ")
+                val method = if (parts.isNotEmpty()) parts[0] else "GET"
+                val path = if (parts.size > 1) parts[1] else "/"
+
+                val headers = mutableMapOf<String, String>()
+                var contentLength = 0
+                var line = reader.readLine()
+                while (!line.isNullOrBlank()) {
+                    val headerParts = line.split(":", limit = 2)
+                    if (headerParts.size == 2) {
+                        val key = headerParts[0].trim().lowercase()
+                        val value = headerParts[1].trim()
+                        headers[key] = value
+                        if (key == "content-length") {
+                            contentLength = value.toIntOrNull() ?: 0
+                        }
+                        if (key == "user-agent") {
+                            val ua = value
+                            if (ua.contains("iPhone")) clientName = "iPhone"
+                            else if (ua.contains("iPad")) clientName = "iPad"
+                            else if (ua.contains("Mac")) clientName = "Mac"
+                        }
+                        if (key == "x-apple-device-model") {
+                            clientName = value
+                        }
+                    }
+                    line = reader.readLine()
+                }
+
+                var body = ""
+                if (contentLength > 0) {
+                    val charArray = CharArray(contentLength)
+                    var readSoFar = 0
+                    while (readSoFar < contentLength) {
+                        val read = reader.read(charArray, readSoFar, contentLength - readSoFar)
+                        if (read == -1) break
+                        readSoFar += read
+                    }
+                    body = String(charArray, 0, readSoFar)
+                }
+
+                if (!deviceDetected) {
+                    deviceDetected = true
+                    notifyDeviceConnected(clientName, "airplay")
+                }
+
+                handleAirplayRequest(method, path, headers, body, output)
+            }
+        } catch (_: Exception) {
+        } finally {
+            try { socket.close() } catch (_: Exception) {}
+            notifyDeviceDisconnected()
+        }
+    }
+
+    private fun handleAirplayRequest(
+        method: String,
+        path: String,
+        headers: Map<String, String>,
+        body: String,
+        output: OutputStream
+    ) {
+        when {
+            path.startsWith("/server-info") || path.startsWith("/info") -> {
+                val mac = getMacAddress()
+                val xmlInfo = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>deviceid</key><string>$mac</string>
+    <key>features</key><integer>1518338039</integer>
+    <key>model</key><string>AppleTV3,2</string>
+    <key>protovers</key><string>1.1</string>
+    <key>srcvers</key><string>220.68</string>
+    <key>statusFlags</key><integer>4</integer>
+</dict>
+</plist>"""
+                sendHttpResponse(output, 200, "OK", "text/x-apple-plist+xml", xmlInfo)
+            }
+            path.startsWith("/play") -> {
+                var streamUrl = ""
+                var mediaType = "video"
+                if (body.contains("<key>Content-Location</key>")) {
+                    val match = Regex("<string>(.*?)</string>").find(body)
+                    if (match != null) streamUrl = match.groupValues[1]
+                }
+                if (streamUrl.contains(".mp3") || streamUrl.contains(".m4a") || streamUrl.contains(".flac")) {
+                    mediaType = "audio"
+                }
+                notifyMediaStarted(mediaType, streamUrl, "AirPlay Medyası", "Apple Cihazı", deviceName)
+                sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+            }
+            path.startsWith("/rate") -> {
+                val value = Regex("value=([0-9.]+)").find(path)?.groupValues?.get(1)?.toDoubleOrNull() ?: 1.0
+                if (value == 0.0) notifyMediaPaused() else notifyMediaResumed()
+                sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+            }
+            path.startsWith("/scrub") -> {
+                if (method == "GET") {
+                    sendHttpResponse(output, 200, "OK", "text/plain", "duration: 100.0\nposition: 0.0\n")
+                } else {
+                    val pos = Regex("position=([0-9.]+)").find(path)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+                    notifyPositionChanged(pos, 100.0)
+                    sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+                }
+            }
+            path.startsWith("/stop") -> {
+                notifyMediaStopped()
+                sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+            }
+            path.startsWith("/setProperty") -> {
+                sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+            }
+            else -> {
+                sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+            }
+        }
+    }
+
+    private fun sendHttpResponse(output: OutputStream, code: Int, status: String, contentType: String, body: String) {
+        val bytes = body.toByteArray(Charsets.UTF_8)
+        val response = "HTTP/1.1 $code $status\r\n" +
+                "Server: AirTunes/220.68\r\n" +
+                "Content-Type: $contentType\r\n" +
+                "Content-Length: ${bytes.size}\r\n" +
+                "Connection: keep-alive\r\n\r\n"
+        output.write(response.toByteArray(Charsets.UTF_8))
+        output.write(bytes)
+        output.flush()
+    }
+
+    private fun startDlnaServer() {
+        executor.execute {
+            try {
+                dlnaServerSocket = ServerSocket(DLNA_PORT).apply {
+                    reuseAddress = true
+                }
+                while (isRunning && dlnaServerSocket?.isClosed == false) {
+                    val client = dlnaServerSocket?.accept() ?: break
+                    executor.execute { handleDlnaClient(client) }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun handleDlnaClient(socket: Socket) {
+        try {
+            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+            val output = socket.getOutputStream()
+            val requestLine = reader.readLine() ?: return
+
+            val parts = requestLine.split(" ")
+            val path = if (parts.size > 1) parts[1] else "/"
+
+            if (path == "/description.xml") {
+                val xmlDesc = """<?xml version="1.0" encoding="utf-8"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <specVersion><major>1</major><minor>0</minor></specVersion>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>
+    <friendlyName>$deviceName (Smart View / DLNA)</friendlyName>
+    <manufacturer>AydTV</manufacturer>
+    <modelName>AydTV Media Renderer</modelName>
+    <modelNumber>1.0</modelNumber>
+    <UDN>uuid:aydtv-${getMacAddress().replace(":", "")}</UDN>
+    <serviceList>
+      <service>
+        <serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType>
+        <serviceId>urn:upnp-org:serviceId:AVTransport</serviceId>
+        <controlURL>/AVTransport/control</controlURL>
+        <eventSubURL>/AVTransport/event</eventSubURL>
+        <SCPDURL>/AVTransport/scpd.xml</SCPDURL>
+      </service>
+    </serviceList>
+  </device>
+</root>"""
+                sendHttpResponse(output, 200, "OK", "text/xml; charset=utf-8", xmlDesc)
+            } else {
+                sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+            }
+        } catch (_: Exception) {
+        } finally {
+            try { socket.close() } catch (_: Exception) {}
+        }
+    }
+
+    fun sendRemoteCommand(action: String, value: Any? = null) {
+        when (action) {
+            "play", "resume" -> notifyMediaResumed()
+            "pause" -> notifyMediaPaused()
+            "seek" -> {
+                val seconds = (value as? Number)?.toDouble() ?: 0.0
+                notifyPositionChanged(seconds, 100.0)
+            }
+            "disconnect" -> {
+                try {
+                    activeClientSocket?.close()
+                } catch (_: Exception) {}
+                notifyMediaStopped()
+                notifyDeviceDisconnected()
+            }
+        }
+    }
+
+    // Flutter Bildirimleri
+    private fun notifyDeviceConnected(name: String, type: String) {
+        mainHandler.post {
+            channel.invokeMethod("onDeviceConnected", mapOf("name" to name, "type" to type))
+        }
+    }
+
+    private fun notifyDeviceDisconnected() {
+        mainHandler.post {
+            channel.invokeMethod("onDeviceDisconnected", null)
+        }
+    }
+
+    private fun notifyMediaStarted(mediaType: String, url: String, title: String, artist: String, album: String) {
+        mainHandler.post {
+            channel.invokeMethod("onMediaStarted", mapOf(
+                "mediaType" to mediaType,
+                "url" to url,
+                "title" to title,
+                "artist" to artist,
+                "album" to album
+            ))
+        }
+    }
+
+    private fun notifyMediaStopped() {
+        mainHandler.post {
+            channel.invokeMethod("onMediaStopped", null)
+        }
+    }
+
+    private fun notifyMediaPaused() {
+        mainHandler.post {
+            channel.invokeMethod("onMediaPaused", null)
+        }
+    }
+
+    private fun notifyMediaResumed() {
+        mainHandler.post {
+            channel.invokeMethod("onMediaResumed", null)
+        }
+    }
+
+    private fun notifyPositionChanged(pos: Double, duration: Double) {
+        mainHandler.post {
+            channel.invokeMethod("onPositionChanged", mapOf("position" to pos, "duration" to duration))
+        }
+    }
+}
