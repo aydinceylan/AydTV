@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ota_update/ota_update.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import '../models/channel.dart';
 import '../services/channel_service.dart';
@@ -59,12 +60,49 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   // EPG Canlı Zamanlayıcı (Dakikalık EPG yenileme)
   Timer? _epgUpdateTimer;
 
+  // Yayın Kararlılık & Tamponlama Modu ('ultra', 'balanced', 'shield')
+  String _bufferMode = 'balanced';
+
+  Future<void> _loadBufferSetting() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _bufferMode = prefs.getString('buffer_mode') ?? 'balanced';
+      });
+    }
+  }
+
+  int _getBufferOffsetSeconds() {
+    switch (_bufferMode) {
+      case 'ultra':
+        return 8; // Ultra Canlı: 8 sn güvenli tampon
+      case 'shield':
+        return 25; // Zırhlı Mod: 25 sn devasa tampon
+      case 'balanced':
+      default:
+        return 16; // Dengeli & Kesintisiz: 16 sn ideal tampon
+    }
+  }
+
+  int _getFreezeTimeoutSeconds() {
+    switch (_bufferMode) {
+      case 'ultra':
+        return 6;
+      case 'shield':
+        return 14;
+      case 'balanced':
+      default:
+        return 9;
+    }
+  }
+
   final FocusNode _screenFocusNode = FocusNode();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _loadBufferSetting();
     _initializeChannels();
     _checkAppUpdates();
     _startFreezeDetector();
@@ -169,6 +207,9 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   void _openSettingsDialog() {
     SettingsDialog.show(
       context,
+      onSettingsChanged: () {
+        _loadBufferSetting();
+      },
       onCheckUpdate: () async {
         _showToast('Güncellemeler denetleniyor...');
         final update = await _updateService.checkForUpdate();
@@ -370,6 +411,19 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
         return;
       }
 
+      // Canlı yayında geriden başlatma (Safe Live Offset):
+      // Eğer canlı akışın süresi (sliding window) varsa, en uçtan geriye çekerek tampon oluştur
+      final duration = newController.value.duration;
+      if (duration > const Duration(seconds: 35)) {
+        final offsetSeconds = _getBufferOffsetSeconds();
+        final targetPosition = duration - Duration(seconds: offsetSeconds);
+        if (targetPosition > Duration.zero) {
+          try {
+            await newController.seekTo(targetPosition);
+          } catch (_) {}
+        }
+      }
+
       await newController.play();
       newController.setLooping(true);
 
@@ -404,8 +458,8 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   }
 
   /// Canlı Yayın Donma (Stall / Freeze) Dedektörü
-  /// Ağ dalgalanmaları veya HLS manifest tıkanmalarında yayının donmasını 3 saniyede
-  /// tespit eder ve kullanıcı kumandaya dokunmadan canlı uca (live edge) veya yedek hatta otomatik bağlanır.
+  /// Ağ dalgalanmaları veya HLS manifest tıkanmalarında yayının donmasını tampon moduna göre
+  /// (6 - 14 sn) tespit eder ve kullanıcı kumandaya dokunmadan canlı uca (live edge) veya yedek hatta otomatik bağlanır.
   void _startFreezeDetector() {
     _freezeCheckTimer?.cancel();
     _stuckCounter = 0;
@@ -433,10 +487,11 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
       final bool isPositionStuck = _lastPosition != null &&
           (val.position - _lastPosition!).inMilliseconds.abs() < 250;
 
+      final timeout = _getFreezeTimeoutSeconds();
       if (isNotPlaying || isBuffering || isPositionStuck) {
         _stuckCounter++;
-        // 3 saniye boyunca donuk kaldıysa otomatik canlı uca veya yedek hatta bağlan
-        if (_stuckCounter >= 3) {
+        // Seçilen tampon moduna göre (6-14 sn) donuk kaldıysa otomatik canlı uca veya yedek hatta bağlan
+        if (_stuckCounter >= timeout) {
           _stuckCounter = 0;
           _recoverStalledPlayback();
         }

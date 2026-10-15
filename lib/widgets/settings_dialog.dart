@@ -5,14 +5,18 @@ import '../services/update_service.dart';
 
 class SettingsDialog extends StatefulWidget {
   final VoidCallback? onCheckUpdate;
+  final VoidCallback? onSettingsChanged;
 
-  const SettingsDialog({super.key, this.onCheckUpdate});
+  const SettingsDialog({super.key, this.onCheckUpdate, this.onSettingsChanged});
 
-  static Future<void> show(BuildContext context, {VoidCallback? onCheckUpdate}) {
+  static Future<void> show(BuildContext context, {VoidCallback? onCheckUpdate, VoidCallback? onSettingsChanged}) {
     return showDialog(
       context: context,
       barrierDismissible: true,
-      builder: (context) => SettingsDialog(onCheckUpdate: onCheckUpdate),
+      builder: (context) => SettingsDialog(
+        onCheckUpdate: onCheckUpdate,
+        onSettingsChanged: onSettingsChanged,
+      ),
     );
   }
 
@@ -24,9 +28,11 @@ class _SettingsDialogState extends State<SettingsDialog> {
   bool _autoStartOnBoot = true;
   bool _keepScreenOn = true;
   bool _muteOnBackground = true;
+  String _bufferMode = 'balanced'; // 'ultra', 'balanced', 'shield'
   bool _isLoading = true;
 
   final FocusNode _closeFocusNode = FocusNode();
+  final FocusNode _bufferFocusNode = FocusNode();
   final FocusNode _bootFocusNode = FocusNode();
   final FocusNode _screenFocusNode = FocusNode();
   final FocusNode _bgAudioFocusNode = FocusNode();
@@ -41,6 +47,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
   @override
   void dispose() {
     _closeFocusNode.dispose();
+    _bufferFocusNode.dispose();
     _bootFocusNode.dispose();
     _screenFocusNode.dispose();
     _bgAudioFocusNode.dispose();
@@ -54,13 +61,157 @@ class _SettingsDialogState extends State<SettingsDialog> {
       _autoStartOnBoot = prefs.getBool('auto_start_on_boot') ?? true;
       _keepScreenOn = prefs.getBool('keep_screen_on') ?? true;
       _muteOnBackground = prefs.getBool('mute_on_background') ?? true;
+      _bufferMode = prefs.getString('buffer_mode') ?? 'balanced';
       _isLoading = false;
     });
   }
 
-  Future<void> _saveSetting(String key, bool value) async {
+  Future<void> _saveSetting(String key, dynamic value) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(key, value);
+    if (value is bool) {
+      await prefs.setBool(key, value);
+    } else if (value is String) {
+      await prefs.setString(key, value);
+    }
+    widget.onSettingsChanged?.call();
+  }
+
+  void _cycleBufferMode() {
+    String nextMode;
+    if (_bufferMode == 'balanced') {
+      nextMode = 'shield';
+    } else if (_bufferMode == 'shield') {
+      nextMode = 'ultra';
+    } else {
+      nextMode = 'balanced';
+    }
+    setState(() {
+      _bufferMode = nextMode;
+    });
+    _saveSetting('buffer_mode', nextMode);
+  }
+
+  String get _bufferModeTitle {
+    switch (_bufferMode) {
+      case 'ultra':
+        return '⚡ Ultra Canlı (8 sn Tampon - Minimum Gecikme)';
+      case 'shield':
+        return '🏰 Zırhlı Mod (25 sn Tampon - Maksimum Kararlılık)';
+      case 'balanced':
+      default:
+        return '🛡️ Kesintisiz & Dengeli (16 sn Tampon - Önerilen)';
+    }
+  }
+
+  String get _bufferModeSubtitle {
+    switch (_bufferMode) {
+      case 'ultra':
+        return 'Maç ve canlı skorlar için minimum gecikme sağlar (hızlı internet önerilir).';
+      case 'shield':
+        return 'Wi-Fi dalgalanmalarında veya yavaş internette donmayı tamamen sıfırlar.';
+      case 'balanced':
+      default:
+        return 'Yayın takılmalarını ve çark beklemesini önleyen ideal canlı yayın güvenliği.';
+    }
+  }
+
+  Widget _buildBufferModeTile() {
+    return Focus(
+      focusNode: _bufferFocusNode,
+      onKeyEvent: (node, event) {
+        if (event.runtimeType.toString().contains('KeyDownEvent')) {
+          final keyName = event.logicalKey.debugName ?? '';
+          if (keyName.contains('Enter') || keyName.contains('Select')) {
+            _cycleBufferMode();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Builder(
+        builder: (context) {
+          final isFocused = Focus.of(context).hasFocus;
+          return InkWell(
+            onTap: _cycleBufferMode,
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: isFocused
+                    ? TVTheme.focusCyan.withValues(alpha: 0.20)
+                    : Colors.white.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isFocused ? TVTheme.focusCyan : TVTheme.focusCyan.withValues(alpha: 0.3),
+                  width: isFocused ? 2 : 1.2,
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.speed_rounded,
+                    color: TVTheme.focusCyan,
+                    size: 26,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              'Yayın Kararlılık & Tampon Modu: ',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: TVTheme.focusCyan.withValues(alpha: 0.25),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                'Değiştirmek İçin OK',
+                                style: TextStyle(
+                                  color: TVTheme.focusCyan,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _bufferModeTitle,
+                          style: TextStyle(
+                            color: isFocused ? Colors.white : TVTheme.focusCyan,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _bufferModeSubtitle,
+                          style: TextStyle(
+                            color: TVTheme.textSecondary.withValues(alpha: 0.85),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.arrow_forward_ios_rounded, color: TVTheme.focusCyan, size: 16),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Widget _buildSettingTile({
@@ -74,7 +225,6 @@ class _SettingsDialogState extends State<SettingsDialog> {
     return Focus(
       focusNode: focusNode,
       onKeyEvent: (node, event) {
-        // Kumandada OK / Enter basıldığında switch durumunu değiştir
         if (event.runtimeType.toString().contains('KeyDownEvent')) {
           final keyName = event.logicalKey.debugName ?? '';
           if (keyName.contains('Enter') || keyName.contains('Select')) {
@@ -149,16 +299,16 @@ class _SettingsDialogState extends State<SettingsDialog> {
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 120, vertical: 40),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 110, vertical: 30),
       child: Container(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
-          color: const Color(0xF00B101B),
+          color: const Color(0xF20B101B),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.4), width: 1.5),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.7),
+              color: Colors.black.withValues(alpha: 0.75),
               blurRadius: 25,
               spreadRadius: 5,
             ),
@@ -214,9 +364,12 @@ class _SettingsDialogState extends State<SettingsDialog> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 14),
 
-                    // 1. TV Açıldığında Otomatik Başlat
+                    // 1. Yayın Kararlılık & Tampon Modu
+                    _buildBufferModeTile(),
+
+                    // 2. TV Açıldığında Otomatik Başlat
                     _buildSettingTile(
                       focusNode: _bootFocusNode,
                       icon: Icons.power_settings_new_rounded,
@@ -229,7 +382,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                       },
                     ),
 
-                    // 2. Ekranı Sürekli Açık Tut / Uyku Modunu Engelle
+                    // 3. Ekranı Sürekli Açık Tut / Uyku Modunu Engelle
                     _buildSettingTile(
                       focusNode: _screenFocusNode,
                       icon: Icons.tv_rounded,
@@ -242,7 +395,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                       },
                     ),
 
-                    // 3. Arka Plana Geçince Sesi Durdur
+                    // 4. Arka Plana Geçince Sesi Durdur
                     _buildSettingTile(
                       focusNode: _bgAudioFocusNode,
                       icon: Icons.volume_off_rounded,
@@ -255,7 +408,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                       },
                     ),
 
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 12),
 
                     // Güncelleme Kontrolü Butonu
                     Focus(
@@ -313,7 +466,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                       ),
                     ),
 
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
 
                     // Sürüm ve Telif Bilgisi
                     Center(
