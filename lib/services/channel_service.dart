@@ -9,6 +9,7 @@ class ChannelService {
   static const String _cacheKey = 'aydtv_cached_channels';
   static const String _favoritesKey = 'aydtv_favorites';
   static const String _lastChannelKey = 'aydtv_last_channel_id';
+  static const String _orderKey = 'aydtv_channel_order_ids';
 
   // GitHub üzerinden dinamik güncellenebilir raw URL
   static const String remoteUrl =
@@ -20,6 +21,7 @@ class ChannelService {
       final prefs = await SharedPreferences.getInstance();
       final cachedJson = prefs.getString(_cacheKey);
       final favoriteIds = prefs.getStringList(_favoritesKey) ?? [];
+      final orderIds = prefs.getStringList(_orderKey) ?? [];
 
       String rawData = '';
       if (cachedJson != null && cachedJson.isNotEmpty) {
@@ -37,13 +39,37 @@ class ChannelService {
         }
       }
 
-      return channels;
+      return _applyCustomOrder(channels, orderIds);
     } catch (e) {
       if (kDebugMode) {
         print('Kanal yükleme hatası: $e');
       }
       return [];
     }
+  }
+
+  List<Channel> _applyCustomOrder(List<Channel> channels, List<String> orderIds) {
+    if (orderIds.isEmpty) return channels;
+    final map = {for (var c in channels) c.id: c};
+    final ordered = <Channel>[];
+    for (var id in orderIds) {
+      if (map.containsKey(id)) {
+        ordered.add(map.remove(id)!);
+      }
+    }
+    ordered.addAll(map.values);
+    return ordered;
+  }
+
+  Future<void> saveChannelOrder(List<Channel> channels) async {
+    final prefs = await SharedPreferences.getInstance();
+    final ids = channels.map((c) => c.id).toList();
+    await prefs.setStringList(_orderKey, ids);
+  }
+
+  Future<void> resetChannelOrder() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_orderKey);
   }
 
   /// Arka planda GitHub'dan yeni listeyi kontrol eder ve sessizce günceller

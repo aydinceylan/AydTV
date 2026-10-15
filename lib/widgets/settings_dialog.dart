@@ -1,23 +1,42 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../theme/tv_theme.dart';
-import '../services/update_service.dart';
+import '../models/channel.dart';
 import '../services/cast_service.dart';
+import '../services/channel_service.dart';
+import '../services/sleep_timer_service.dart';
+import '../services/update_service.dart';
+import '../theme/tv_theme.dart';
 import 'default_tv_dialog.dart';
 
 class SettingsDialog extends StatefulWidget {
   final VoidCallback? onCheckUpdate;
   final VoidCallback? onSettingsChanged;
+  final List<Channel>? channels;
+  final Function(List<Channel>)? onChannelsReordered;
 
-  const SettingsDialog({super.key, this.onCheckUpdate, this.onSettingsChanged});
+  const SettingsDialog({
+    super.key,
+    this.onCheckUpdate,
+    this.onSettingsChanged,
+    this.channels,
+    this.onChannelsReordered,
+  });
 
-  static Future<void> show(BuildContext context, {VoidCallback? onCheckUpdate, VoidCallback? onSettingsChanged}) {
+  static Future<void> show(
+    BuildContext context, {
+    VoidCallback? onCheckUpdate,
+    VoidCallback? onSettingsChanged,
+    List<Channel>? channels,
+    Function(List<Channel>)? onChannelsReordered,
+  }) {
     return showDialog(
       context: context,
       barrierDismissible: true,
       builder: (context) => SettingsDialog(
         onCheckUpdate: onCheckUpdate,
         onSettingsChanged: onSettingsChanged,
+        channels: channels,
+        onChannelsReordered: onChannelsReordered,
       ),
     );
   }
@@ -27,46 +46,45 @@ class SettingsDialog extends StatefulWidget {
 }
 
 class _SettingsDialogState extends State<SettingsDialog> {
+  int _selectedTab = 0; // 0: Genel, 1: Kanallar, 2: Kumanda/AirPlay, 3: Uyku, 4: Sistem
+  bool _isLoading = true;
+
+  // Ayar Değerleri
   bool _autoStartOnBoot = true;
   bool _keepScreenOn = true;
   bool _muteOnBackground = true;
   bool _castEnabled = true;
   bool _castPinEnabled = false;
-  String _bufferMode = 'balanced'; // 'ultra', 'balanced', 'shield'
-  bool _isLoading = true;
+  String _bufferMode = 'balanced';
+  String _localIp = '127.0.0.1';
 
-  final FocusNode _closeFocusNode = FocusNode();
-  final FocusNode _bufferFocusNode = FocusNode();
-  final FocusNode _defaultTvFocusNode = FocusNode();
-  final FocusNode _bootFocusNode = FocusNode();
-  final FocusNode _screenFocusNode = FocusNode();
-  final FocusNode _bgAudioFocusNode = FocusNode();
-  final FocusNode _castFocusNode = FocusNode();
-  final FocusNode _castPinFocusNode = FocusNode();
-  final FocusNode _updateFocusNode = FocusNode();
+  // Kanal Sıralama Durumu
+  List<Channel> _orderableChannels = [];
+  int? _movingChannelIndex;
+
+  final ChannelService _channelService = ChannelService();
+  final SleepTimerService _sleepService = SleepTimerService();
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
-  }
-
-  @override
-  void dispose() {
-    _closeFocusNode.dispose();
-    _bufferFocusNode.dispose();
-    _defaultTvFocusNode.dispose();
-    _bootFocusNode.dispose();
-    _screenFocusNode.dispose();
-    _bgAudioFocusNode.dispose();
-    _castFocusNode.dispose();
-    _castPinFocusNode.dispose();
-    _updateFocusNode.dispose();
-    super.dispose();
+    _sleepService.onTick = () {
+      if (mounted) setState(() {});
+    };
   }
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    final ip = await CastService().getLocalIp();
+
+    List<Channel> chs = [];
+    if (widget.channels != null && widget.channels!.isNotEmpty) {
+      chs = List.from(widget.channels!);
+    } else {
+      chs = await _channelService.loadInitialChannels();
+    }
+
     setState(() {
       _autoStartOnBoot = prefs.getBool('auto_start_on_boot') ?? true;
       _keepScreenOn = prefs.getBool('keep_screen_on') ?? true;
@@ -74,6 +92,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
       _castEnabled = prefs.getBool('cast_enabled') ?? true;
       _castPinEnabled = prefs.getBool('cast_pin_enabled') ?? false;
       _bufferMode = prefs.getString('buffer_mode') ?? 'balanced';
+      _localIp = ip;
+      _orderableChannels = chs;
       _isLoading = false;
     });
   }
@@ -85,6 +105,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
     } else if (value is String) {
       await prefs.setString(key, value);
     }
+
     if (key == 'cast_enabled') {
       if (value == true) {
         CastService().startServer(pinEnabled: _castPinEnabled);
@@ -96,56 +117,154 @@ class _SettingsDialogState extends State<SettingsDialog> {
         CastService().startServer(pinEnabled: value == true);
       }
     }
+
     widget.onSettingsChanged?.call();
   }
 
   void _cycleBufferMode() {
-    String nextMode;
-    if (_bufferMode == 'balanced') {
-      nextMode = 'shield';
-    } else if (_bufferMode == 'shield') {
-      nextMode = 'ultra';
-    } else {
-      nextMode = 'balanced';
-    }
-    setState(() {
-      _bufferMode = nextMode;
-    });
+    String nextMode = _bufferMode == 'balanced'
+        ? 'shield'
+        : (_bufferMode == 'shield' ? 'ultra' : 'balanced');
+    setState(() => _bufferMode = nextMode);
     _saveSetting('buffer_mode', nextMode);
   }
 
-  String get _bufferModeTitle {
-    switch (_bufferMode) {
-      case 'ultra':
-        return '⚡ Ultra Canlı (8 sn Tampon - Minimum Gecikme)';
-      case 'shield':
-        return '🏰 Zırhlı Mod (25 sn Tampon - Maksimum Kararlılık)';
-      case 'balanced':
-      default:
-        return '🛡️ Kesintisiz & Dengeli (16 sn Tampon - Önerilen)';
-    }
+  void _moveChannel(int oldIndex, int newIndex) {
+    if (newIndex < 0 || newIndex >= _orderableChannels.length) return;
+    setState(() {
+      final ch = _orderableChannels.removeAt(oldIndex);
+      _orderableChannels.insert(newIndex, ch);
+      _movingChannelIndex = newIndex;
+    });
+    _channelService.saveChannelOrder(_orderableChannels);
+    widget.onChannelsReordered?.call(_orderableChannels);
   }
 
-  String get _bufferModeSubtitle {
-    switch (_bufferMode) {
-      case 'ultra':
-        return 'Maç ve canlı skorlar için minimum gecikme sağlar (hızlı internet önerilir).';
-      case 'shield':
-        return 'Wi-Fi dalgalanmalarında veya yavaş internette donmayı tamamen sıfırlar.';
-      case 'balanced':
-      default:
-        return 'Yayın takılmalarını ve çark beklemesini önleyen ideal canlı yayın güvenliği.';
-    }
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 50, vertical: 24),
+      child: Container(
+        width: 1050,
+        height: 580,
+        decoration: BoxDecoration(
+          color: const Color(0xF5080E1A),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.5), width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.85),
+              blurRadius: 35,
+              spreadRadius: 8,
+            ),
+          ],
+        ),
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator(color: TVTheme.focusCyan))
+            : Row(
+                children: [
+                  // SOL PANEL: KATEGORİ SEKMELERİ
+                  Container(
+                    width: 250,
+                    padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.4),
+                      borderRadius: const BorderRadius.horizontal(left: Radius.circular(23)),
+                      border: Border(right: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Başlık
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          child: Row(
+                            children: const [
+                              Icon(Icons.tune_rounded, color: TVTheme.focusCyan, size: 24),
+                              SizedBox(width: 10),
+                              Text(
+                                'AydTV Ayarları',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+
+                        // Sekmeler
+                        _buildTabButton(0, Icons.speed_rounded, 'Genel & Yayın'),
+                        _buildTabButton(1, Icons.format_list_numbered_rounded, 'Kanal Sıralama'),
+                        _buildTabButton(2, Icons.airplay_rounded, 'Kumanda & AirPlay'),
+                        _buildTabButton(3, Icons.bedtime_rounded, 'Uyku Zamanlayıcı'),
+                        _buildTabButton(4, Icons.settings_system_daydream_rounded, 'Sistem & TV Tuşu'),
+
+                        const Spacer(),
+
+                        // Çıkış Butonu
+                        Focus(
+                          child: Builder(
+                            builder: (context) {
+                              final isFocused = Focus.of(context).hasFocus;
+                              return InkWell(
+                                onTap: () => Navigator.of(context).pop(),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                                  decoration: BoxDecoration(
+                                    color: isFocused ? Colors.redAccent.withValues(alpha: 0.25) : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: isFocused ? Colors.redAccent : Colors.white12,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.close_rounded, color: isFocused ? Colors.redAccent : Colors.white60, size: 20),
+                                      const SizedBox(width: 10),
+                                      Text(
+                                        'Ayarları Kapat',
+                                        style: TextStyle(
+                                          color: isFocused ? Colors.white : Colors.white70,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // SAĞ PANEL: DETAY İÇERİK
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: _buildRightPanelContent(),
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
   }
 
-  Widget _buildBufferModeTile() {
+  Widget _buildTabButton(int index, IconData icon, String title) {
+    final isSelected = _selectedTab == index;
     return Focus(
-      focusNode: _bufferFocusNode,
+      autofocus: index == 0,
       onKeyEvent: (node, event) {
         if (event.runtimeType.toString().contains('KeyDownEvent')) {
           final keyName = event.logicalKey.debugName ?? '';
           if (keyName.contains('Enter') || keyName.contains('Select')) {
-            _cycleBufferMode();
+            setState(() => _selectedTab = index);
             return KeyEventResult.handled;
           }
         }
@@ -155,79 +274,36 @@ class _SettingsDialogState extends State<SettingsDialog> {
         builder: (context) {
           final isFocused = Focus.of(context).hasFocus;
           return InkWell(
-            onTap: _cycleBufferMode,
+            onTap: () => setState(() => _selectedTab = index),
             child: Container(
               margin: const EdgeInsets.symmetric(vertical: 4),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
                 color: isFocused
-                    ? TVTheme.focusCyan.withValues(alpha: 0.20)
-                    : Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(12),
+                    ? TVTheme.focusCyan.withValues(alpha: 0.25)
+                    : (isSelected ? Colors.white.withValues(alpha: 0.08) : Colors.transparent),
+                borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: isFocused ? TVTheme.focusCyan : TVTheme.focusCyan.withValues(alpha: 0.3),
-                  width: isFocused ? 2 : 1.2,
+                  color: isFocused ? TVTheme.focusCyan : Colors.transparent,
+                  width: 1.5,
                 ),
               ),
               child: Row(
                 children: [
-                  const Icon(
-                    Icons.speed_rounded,
-                    color: TVTheme.focusCyan,
-                    size: 26,
+                  Icon(
+                    icon,
+                    size: 20,
+                    color: isFocused || isSelected ? TVTheme.focusCyan : Colors.white60,
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Text(
-                              'Yayın Kararlılık & Tampon Modu: ',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 13,
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: TVTheme.focusCyan.withValues(alpha: 0.25),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                'Değiştirmek İçin OK',
-                                style: TextStyle(
-                                  color: TVTheme.focusCyan,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _bufferModeTitle,
-                          style: TextStyle(
-                            color: isFocused ? Colors.white : TVTheme.focusCyan,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _bufferModeSubtitle,
-                          style: TextStyle(
-                            color: TVTheme.textSecondary.withValues(alpha: 0.85),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
+                  const SizedBox(width: 12),
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: isFocused || isSelected ? Colors.white : Colors.white70,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      fontSize: 14,
                     ),
                   ),
-                  const Icon(Icons.arrow_forward_ios_rounded, color: TVTheme.focusCyan, size: 16),
                 ],
               ),
             ),
@@ -237,8 +313,530 @@ class _SettingsDialogState extends State<SettingsDialog> {
     );
   }
 
-  Widget _buildSettingTile({
-    required FocusNode focusNode,
+  Widget _buildRightPanelContent() {
+    switch (_selectedTab) {
+      case 0:
+        return _buildGeneralSettings();
+      case 1:
+        return _buildChannelOrderSettings();
+      case 2:
+        return _buildRemoteAndCastSettings();
+      case 3:
+        return _buildSleepTimerSettings();
+      case 4:
+      default:
+        return _buildSystemSettings();
+    }
+  }
+
+  // 1. GENEL & YAYIN AYARLARI
+  Widget _buildGeneralSettings() {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Genel & Canlı Yayın Tercihleri', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 14),
+
+          // Tampon Modu
+          Focus(
+            child: Builder(
+              builder: (context) {
+                final isFocused = Focus.of(context).hasFocus;
+                return InkWell(
+                  onTap: _cycleBufferMode,
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: isFocused ? TVTheme.focusCyan.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: isFocused ? TVTheme.focusCyan : Colors.white12),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.speed_rounded, color: TVTheme.focusCyan, size: 28),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Yayın Kararlılık & Tampon: ${_bufferMode.toUpperCase()}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                              const SizedBox(height: 2),
+                              Text(
+                                _bufferMode == 'ultra'
+                                    ? 'Ultra Canlı: 8 sn tampon (minimum gecikme)'
+                                    : (_bufferMode == 'shield'
+                                        ? 'Zırhlı Mod: 25 sn tampon (donmayı tamamen sıfırlar)'
+                                        : 'Kesintisiz & Dengeli: 16 sn tampon (ideal güvenlik)'),
+                                style: TextStyle(color: TVTheme.textSecondary.withValues(alpha: 0.8), fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(color: TVTheme.focusCyan, borderRadius: BorderRadius.circular(8)),
+                          child: const Text('Değiştir (OK)', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          _buildSwitchRow(
+            icon: Icons.power_settings_new_rounded,
+            title: 'TV Açıldığında Otomatik Başlat',
+            subtitle: 'Televizyon açılır açılmaz doğrudan AydTV başlasın.',
+            value: _autoStartOnBoot,
+            onChanged: (v) {
+              setState(() => _autoStartOnBoot = v);
+              _saveSetting('auto_start_on_boot', v);
+            },
+          ),
+          const SizedBox(height: 8),
+
+          _buildSwitchRow(
+            icon: Icons.tv_rounded,
+            title: 'Ekranı Sürekli Açık Tut (Uyku Engelle)',
+            subtitle: 'Yayın esnasında televizyonun hareketsizlikten kapanmasını önler.',
+            value: _keepScreenOn,
+            onChanged: (v) {
+              setState(() => _keepScreenOn = v);
+              _saveSetting('keep_screen_on', v);
+            },
+          ),
+          const SizedBox(height: 8),
+
+          _buildSwitchRow(
+            icon: Icons.volume_off_rounded,
+            title: 'Arka Plana Geçince Sesi Durdur',
+            subtitle: 'TV ana menüsüne veya başka uygulamaya geçince yayının sesi kesilsin.',
+            value: _muteOnBackground,
+            onChanged: (v) {
+              setState(() => _muteOnBackground = v);
+              _saveSetting('mute_on_background', v);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 2. KANAL SIRALAMA AYARLARI
+  Widget _buildChannelOrderSettings() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text('Kanal Sıralamasını Düzenle', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                SizedBox(height: 2),
+                Text('Seçili kanala OK basıp Yukarı/Aşağı taşıyın, tekrar OK ile kilitleyin.', style: TextStyle(color: TVTheme.textSecondary, fontSize: 12)),
+              ],
+            ),
+            TextButton.icon(
+              icon: const Icon(Icons.refresh_rounded, size: 16, color: TVTheme.focusCyan),
+              label: const Text('Sıfırla', style: TextStyle(color: TVTheme.focusCyan, fontSize: 13)),
+              onPressed: () async {
+                await _channelService.resetChannelOrder();
+                final original = await _channelService.loadInitialChannels();
+                setState(() => _orderableChannels = original);
+                widget.onChannelsReordered?.call(original);
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.03),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white10),
+            ),
+            child: ListView.builder(
+              itemCount: _orderableChannels.length,
+              itemBuilder: (context, index) {
+                final ch = _orderableChannels[index];
+                final isMoving = _movingChannelIndex == index;
+
+                return Focus(
+                  onKeyEvent: (node, event) {
+                    if (event.runtimeType.toString().contains('KeyDownEvent')) {
+                      final key = event.logicalKey.debugName ?? '';
+                      if (key.contains('Enter') || key.contains('Select')) {
+                        setState(() {
+                          _movingChannelIndex = isMoving ? null : index;
+                        });
+                        return KeyEventResult.handled;
+                      } else if (isMoving && key.contains('Arrow Up')) {
+                        _moveChannel(index, index - 1);
+                        return KeyEventResult.handled;
+                      } else if (isMoving && key.contains('Arrow Down')) {
+                        _moveChannel(index, index + 1);
+                        return KeyEventResult.handled;
+                      }
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                  child: Builder(
+                    builder: (context) {
+                      final isFocused = Focus.of(context).hasFocus;
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: isMoving
+                              ? Colors.greenAccent.withValues(alpha: 0.25)
+                              : (isFocused ? TVTheme.focusCyan.withValues(alpha: 0.2) : Colors.transparent),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isMoving ? Colors.greenAccent : (isFocused ? TVTheme.focusCyan : Colors.transparent),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: isMoving ? Colors.greenAccent : TVTheme.focusCyan.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '${index + 1}',
+                                  style: TextStyle(
+                                    color: isMoving ? Colors.black : Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Text(
+                                ch.name,
+                                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            if (isMoving)
+                              const Text('Taşınıyor (▲ ▼)', style: TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.bold))
+                            else
+                              const Text('Seç (OK)', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 3. TELEFONDAN KUMANDA & AIRPLAY AYARLARI
+  Widget _buildRemoteAndCastSettings() {
+    final remoteUrl = 'http://$_localIp:8088';
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Telefondan Akıllı Kumanda & AirPlay', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 14),
+
+          // Akıllı Kumanda Bilgi Kartı
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [TVTheme.focusCyan.withValues(alpha: 0.15), Colors.white.withValues(alpha: 0.04)],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: TVTheme.focusCyan.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(14)),
+                  child: const Icon(Icons.qr_code_2_rounded, color: TVTheme.focusCyan, size: 36),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Telefondan Kumanda Et (Sıfır Uygulama)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Aynı Wi-Fi ağındaki herhangi bir iPhone veya Android cihazın tarayıcısından bu adrese girin:',
+                        style: TextStyle(color: TVTheme.textSecondary.withValues(alpha: 0.9), fontSize: 12),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(6)),
+                        child: Text(remoteUrl, style: const TextStyle(color: TVTheme.focusCyan, fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 0.5)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          _buildSwitchRow(
+            icon: Icons.airplay_rounded,
+            title: 'Kablosuz Ekran Paylaşımı (AirPlay & DLNA)',
+            subtitle: 'iPhone, iPad, Mac ve Android cihazların ekranını TV\'ye yansıtmasını sağlar.',
+            value: _castEnabled,
+            onChanged: (v) {
+              setState(() => _castEnabled = v);
+              _saveSetting('cast_enabled', v);
+            },
+          ),
+          const SizedBox(height: 8),
+
+          if (_castEnabled)
+            _buildSwitchRow(
+              icon: Icons.lock_outline_rounded,
+              title: 'AirPlay PIN Kodu Koruması',
+              subtitle: 'İlk kez bağlanan yabancı cihazlardan TV ekranında rastgele 4 haneli kod ister.',
+              value: _castPinEnabled,
+              onChanged: (v) {
+                setState(() => _castPinEnabled = v);
+                _saveSetting('cast_pin_enabled', v);
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  // 4. UYKU ZAMANLAYICISI
+  Widget _buildSleepTimerSettings() {
+    final activeMinutes = _sleepService.isActive ? (_sleepService.remainingSeconds ~/ 60) + 1 : 0;
+    final options = [0, 15, 30, 45, 60, 90, 120];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Uyku Zamanlayıcısı (Otomatik Kapanma)', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 6),
+        Text(
+          'Gece televizyon karşısında uyuyakaldığınızda yayını otomatik durdurur ve ekranı kapatır.',
+          style: TextStyle(color: TVTheme.textSecondary.withValues(alpha: 0.8), fontSize: 13),
+        ),
+        const SizedBox(height: 18),
+
+        // Kalan Süre Göstergesi
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          decoration: BoxDecoration(
+            color: _sleepService.isActive ? TVTheme.focusCyan.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _sleepService.isActive ? TVTheme.focusCyan : Colors.white12),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.timer_rounded, color: _sleepService.isActive ? TVTheme.focusCyan : Colors.white54, size: 28),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  _sleepService.isActive
+                      ? '⏱️ Kalan Süre: ${_sleepService.remainingFormatted} sonra yayın durdurulacak'
+                      : 'Zamanlayıcı şu an kapalı.',
+                  style: TextStyle(
+                    color: _sleepService.isActive ? Colors.white : Colors.white70,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              if (_sleepService.isActive)
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+                  onPressed: () {
+                    _sleepService.cancelTimer();
+                    setState(() {});
+                  },
+                  child: const Text('İptal Et'),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        const Text('Hızlı Süre Seçimi:', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 14)),
+        const SizedBox(height: 10),
+
+        Wrap(
+          spacing: 12,
+          runSpacing: 10,
+          children: options.map((m) {
+            final isSelected = (m == 0 && !_sleepService.isActive) || (m > 0 && activeMinutes == m);
+            return Focus(
+              child: Builder(
+                builder: (context) {
+                  final isFocused = Focus.of(context).hasFocus;
+                  return InkWell(
+                    onTap: () {
+                      if (m == 0) {
+                        _sleepService.cancelTimer();
+                      } else {
+                        _sleepService.startTimer(m);
+                      }
+                      setState(() {});
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: isFocused
+                            ? TVTheme.focusCyan
+                            : (isSelected ? TVTheme.focusCyan.withValues(alpha: 0.3) : Colors.white.withValues(alpha: 0.05)),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isFocused || isSelected ? TVTheme.focusCyan : Colors.white12,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Text(
+                        m == 0 ? 'Kapat' : '$m Dakika',
+                        style: TextStyle(
+                          color: isFocused ? Colors.black : Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  // 5. SİSTEM & TV TUŞU AYARLARI
+  Widget _buildSystemSettings() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Sistem & Televizyon Entegrasyonu', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 14),
+
+        // TV Tuşunu AydTV'ye Ata
+        Focus(
+          child: Builder(
+            builder: (context) {
+              final isFocused = Focus.of(context).hasFocus;
+              return InkWell(
+                onTap: () {
+                  Navigator.of(context).pop();
+                  DefaultTvDialog.show(context);
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: isFocused ? TVTheme.focusCyan.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: isFocused ? TVTheme.focusCyan : Colors.white12),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.live_tv_rounded, color: TVTheme.focusCyan, size: 28),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text('📺 TV Tuşunu AydTV\'ye Ata', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                            SizedBox(height: 2),
+                            Text('Kumandadaki TV / Canlı TV tuşunun doğrudan AydTV\'yi açmasını sağlar.', style: TextStyle(color: TVTheme.textSecondary, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios_rounded, color: TVTheme.focusCyan, size: 16),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Güncellemeleri Denetle
+        Focus(
+          child: Builder(
+            builder: (context) {
+              final isFocused = Focus.of(context).hasFocus;
+              return InkWell(
+                onTap: () {
+                  Navigator.of(context).pop();
+                  widget.onCheckUpdate?.call();
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: isFocused ? TVTheme.focusCyan.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: isFocused ? TVTheme.focusCyan : Colors.white12),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.system_update_rounded, color: TVTheme.focusCyan, size: 28),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text('Güncellemeleri Şimdi Denetle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                            SizedBox(height: 2),
+                            Text('GitHub üzerinden en son AydTV APK sürümünü kontrol eder.', style: TextStyle(color: TVTheme.textSecondary, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios_rounded, color: TVTheme.focusCyan, size: 16),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+
+        const Spacer(),
+
+        Center(
+          child: Text(
+            'AydTV v${UpdateService.currentVersion} • aydcode.com.tr',
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 13),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSwitchRow({
     required IconData icon,
     required String title,
     required String subtitle,
@@ -246,61 +844,27 @@ class _SettingsDialogState extends State<SettingsDialog> {
     required ValueChanged<bool> onChanged,
   }) {
     return Focus(
-      focusNode: focusNode,
-      onKeyEvent: (node, event) {
-        if (event.runtimeType.toString().contains('KeyDownEvent')) {
-          final keyName = event.logicalKey.debugName ?? '';
-          if (keyName.contains('Enter') || keyName.contains('Select')) {
-            onChanged(!value);
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
       child: Builder(
         builder: (context) {
           final isFocused = Focus.of(context).hasFocus;
           return Container(
-            margin: const EdgeInsets.symmetric(vertical: 4),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: isFocused
-                  ? TVTheme.focusCyan.withValues(alpha: 0.15)
-                  : Colors.white.withValues(alpha: 0.04),
+              color: isFocused ? TVTheme.focusCyan.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.04),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isFocused ? TVTheme.focusCyan : Colors.white.withValues(alpha: 0.08),
-                width: isFocused ? 1.5 : 1,
-              ),
+              border: Border.all(color: isFocused ? TVTheme.focusCyan : Colors.white12),
             ),
             child: Row(
               children: [
-                Icon(
-                  icon,
-                  color: isFocused ? TVTheme.focusCyan : Colors.white70,
-                  size: 24,
-                ),
+                Icon(icon, color: isFocused ? TVTheme.focusCyan : Colors.white70, size: 24),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          color: isFocused ? Colors.white : Colors.white.withValues(alpha: 0.9),
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                        ),
-                      ),
+                      Text(title, style: TextStyle(color: isFocused ? Colors.white : Colors.white.withValues(alpha: 0.9), fontWeight: FontWeight.w600, fontSize: 14)),
                       const SizedBox(height: 2),
-                      Text(
-                        subtitle,
-                        style: TextStyle(
-                          color: TVTheme.textSecondary.withValues(alpha: 0.8),
-                          fontSize: 12,
-                        ),
-                      ),
+                      Text(subtitle, style: TextStyle(color: TVTheme.textSecondary.withValues(alpha: 0.8), fontSize: 12)),
                     ],
                   ),
                 ),
@@ -314,279 +878,6 @@ class _SettingsDialogState extends State<SettingsDialog> {
             ),
           );
         },
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 110, vertical: 30),
-      child: Container(
-        padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          color: const Color(0xF20B101B),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.4), width: 1.5),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.75),
-              blurRadius: 25,
-              spreadRadius: 5,
-            ),
-          ],
-        ),
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: TVTheme.focusCyan))
-            : SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Başlık
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: TVTheme.focusCyan.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Icon(Icons.settings_suggest_rounded, color: TVTheme.focusCyan, size: 26),
-                            ),
-                            const SizedBox(width: 12),
-                            const Text(
-                              'AydTV Ayarları',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                        Focus(
-                          focusNode: _closeFocusNode,
-                          child: Builder(
-                            builder: (context) {
-                              final isFocused = Focus.of(context).hasFocus;
-                              return IconButton(
-                                icon: Icon(
-                                  Icons.close_rounded,
-                                  color: isFocused ? TVTheme.focusCyan : Colors.white54,
-                                  size: 26,
-                                ),
-                                onPressed: () => Navigator.of(context).pop(),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-
-                    // 1. Yayın Kararlılık & Tampon Modu
-                    _buildBufferModeTile(),
-
-                    // 2. TV Açıldığında Otomatik Başlat
-                    _buildSettingTile(
-                      focusNode: _bootFocusNode,
-                      icon: Icons.power_settings_new_rounded,
-                      title: 'TV Açıldığında Otomatik Başlat',
-                      subtitle: 'Televizyon veya TV Box açıldığında doğrudan AydTV yayını başlasın.',
-                      value: _autoStartOnBoot,
-                      onChanged: (val) {
-                        setState(() => _autoStartOnBoot = val);
-                        _saveSetting('auto_start_on_boot', val);
-                      },
-                    ),
-
-                    // 3. Ekranı Sürekli Açık Tut / Uyku Modunu Engelle
-                    _buildSettingTile(
-                      focusNode: _screenFocusNode,
-                      icon: Icons.tv_rounded,
-                      title: 'Ekranı Sürekli Açık Tut (Uyku Engelle)',
-                      subtitle: 'Yayın açıkken televizyonun hareketsizlikten kapanmasını önler.',
-                      value: _keepScreenOn,
-                      onChanged: (val) {
-                        setState(() => _keepScreenOn = val);
-                        _saveSetting('keep_screen_on', val);
-                      },
-                    ),
-
-                    // 4. Arka Plana Geçince Sesi Durdur
-                    _buildSettingTile(
-                      focusNode: _bgAudioFocusNode,
-                      icon: Icons.volume_off_rounded,
-                      title: 'Arka Planda Sesi Durdur',
-                      subtitle: 'TV ana menüsüne veya başka uygulamaya geçince yayının sesi kesilsin.',
-                      value: _muteOnBackground,
-                      onChanged: (val) {
-                        setState(() => _muteOnBackground = val);
-                        _saveSetting('mute_on_background', val);
-                      },
-                    ),
-
-                    // 5. Kablosuz Ekran Paylaşımı (AirPlay & DLNA)
-                    _buildSettingTile(
-                      focusNode: _castFocusNode,
-                      icon: Icons.airplay_rounded,
-                      title: 'Kablosuz Ekran Paylaşımı (AirPlay & DLNA)',
-                      subtitle: 'iPhone, iPad, Mac ve Android telefonlardan TV\'ye yansıtmayı aktif eder.',
-                      value: _castEnabled,
-                      onChanged: (val) {
-                        setState(() => _castEnabled = val);
-                        _saveSetting('cast_enabled', val);
-                      },
-                    ),
-
-                    // 6. AirPlay PIN Kodu Güvenliği
-                    if (_castEnabled)
-                      _buildSettingTile(
-                        focusNode: _castPinFocusNode,
-                        icon: Icons.lock_outline_rounded,
-                        title: 'AirPlay PIN Kodu Koruması',
-                        subtitle: 'İlk kez bağlanan cihazlardan TV ekranında rastgele 4 haneli kod ister.',
-                        value: _castPinEnabled,
-                        onChanged: (val) {
-                          setState(() => _castPinEnabled = val);
-                          _saveSetting('cast_pin_enabled', val);
-                        },
-                      ),
-
-                    // 5. Varsayılan TV Yapma Rehberi Butonu
-                    Focus(
-                      focusNode: _defaultTvFocusNode,
-                      onKeyEvent: (node, event) {
-                        if (event.runtimeType.toString().contains('KeyDownEvent')) {
-                          final keyName = event.logicalKey.debugName ?? '';
-                          if (keyName.contains('Enter') || keyName.contains('Select')) {
-                            Navigator.of(context).pop();
-                            DefaultTvDialog.show(context);
-                            return KeyEventResult.handled;
-                          }
-                        }
-                        return KeyEventResult.ignored;
-                      },
-                      child: Builder(
-                        builder: (context) {
-                          final isFocused = Focus.of(context).hasFocus;
-                          return InkWell(
-                            onTap: () {
-                              Navigator.of(context).pop();
-                              DefaultTvDialog.show(context);
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: isFocused ? TVTheme.focusCyan : Colors.white.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: isFocused ? Colors.white : TVTheme.focusCyan.withValues(alpha: 0.4),
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.live_tv_rounded,
-                                    color: isFocused ? Colors.black : TVTheme.focusCyan,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    '📺 TV Tuşunu AydTV\'ye Ata (Varsayılan TV Rehberi)',
-                                    style: TextStyle(
-                                      color: isFocused ? Colors.black : Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-
-                    // Güncelleme Kontrolü Butonu
-                    Focus(
-                      focusNode: _updateFocusNode,
-                      onKeyEvent: (node, event) {
-                        if (event.runtimeType.toString().contains('KeyDownEvent')) {
-                          final keyName = event.logicalKey.debugName ?? '';
-                          if (keyName.contains('Enter') || keyName.contains('Select')) {
-                            Navigator.of(context).pop();
-                            widget.onCheckUpdate?.call();
-                            return KeyEventResult.handled;
-                          }
-                        }
-                        return KeyEventResult.ignored;
-                      },
-                      child: Builder(
-                        builder: (context) {
-                          final isFocused = Focus.of(context).hasFocus;
-                          return InkWell(
-                            onTap: () {
-                              Navigator.of(context).pop();
-                              widget.onCheckUpdate?.call();
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: isFocused ? TVTheme.focusCyan : Colors.white12,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: isFocused ? Colors.white : Colors.white24,
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.system_update_rounded,
-                                    color: isFocused ? Colors.black : TVTheme.focusCyan,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    'Güncellemeleri Şimdi Denetle',
-                                    style: TextStyle(
-                                      color: isFocused ? Colors.black : Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-
-                    const SizedBox(height: 10),
-
-                    // Sürüm ve Telif Bilgisi
-                    Center(
-                      child: Text(
-                        'AydTV v${UpdateService.currentVersion} • aydcode.com.tr',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.4),
-                          fontSize: 12,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
       ),
     );
   }

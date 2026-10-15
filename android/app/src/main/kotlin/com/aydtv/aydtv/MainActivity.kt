@@ -89,6 +89,9 @@ class MainActivity : FlutterActivity() {
                     castServerManager?.sendRemoteCommand(action, value)
                     result.success(true)
                 }
+                "getLocalIp" -> {
+                    result.success(castServerManager?.getLocalIpAddress() ?: "127.0.0.1")
+                }
                 else -> {
                     result.notImplemented()
                 }

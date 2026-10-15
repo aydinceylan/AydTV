@@ -6,7 +6,6 @@ import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.Looper
-import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.*
 import java.net.*
@@ -23,7 +22,7 @@ class CastServerManager(
     private var multicastLock: WifiManager.MulticastLock? = null
 
     private var airplayServerSocket: ServerSocket? = null
-    private var dlnaServerSocket: ServerSocket? = null
+    private var webRemoteServerSocket: ServerSocket? = null
 
     private var isRunning = false
     private var deviceName = "AydTV"
@@ -33,7 +32,7 @@ class CastServerManager(
     companion object {
         const val AIRPLAY_PORT = 7000
         const val RAOP_PORT = 5000
-        const val DLNA_PORT = 8088
+        const val WEB_REMOTE_PORT = 8088
     }
 
     fun start(customName: String = "AydTV", isPinRequired: Boolean = false) {
@@ -44,7 +43,7 @@ class CastServerManager(
 
         acquireMulticastLock()
         startAirplayServer()
-        startDlnaServer()
+        startWebRemoteServer()
         registerMdnsServices()
     }
 
@@ -58,12 +57,12 @@ class CastServerManager(
         try {
             activeClientSocket?.close()
             airplayServerSocket?.close()
-            dlnaServerSocket?.close()
+            webRemoteServerSocket?.close()
         } catch (_: Exception) {}
 
         activeClientSocket = null
         airplayServerSocket = null
-        dlnaServerSocket = null
+        webRemoteServerSocket = null
     }
 
     private fun acquireMulticastLock() {
@@ -83,6 +82,23 @@ class CastServerManager(
             }
         } catch (_: Exception) {}
         multicastLock = null
+    }
+
+    fun getLocalIpAddress(): String {
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val nif = interfaces.nextElement()
+                val addrs = nif.inetAddresses
+                while (addrs.hasMoreElements()) {
+                    val addr = addrs.nextElement()
+                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                        return addr.hostAddress ?: "127.0.0.1"
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return "127.0.0.1"
     }
 
     private fun getMacAddress(): String {
@@ -107,15 +123,15 @@ class CastServerManager(
             val mac = getMacAddress()
             val macNoColon = mac.replace(":", "")
 
-            // 1. AirPlay Video & Mirroring Servisi
+            // 1. Standart AirPlay Servisi (Tüm iOS cihazlarıyla uyumlu şifresiz HLS & Video & Fotoğraf)
             val airplayService = NsdServiceInfo().apply {
                 serviceName = deviceName
                 serviceType = "_airplay._tcp"
                 port = AIRPLAY_PORT
                 setAttribute("deviceid", mac)
-                setAttribute("features", "0x5A7FFFF7,0x1E")
-                setAttribute("model", "AppleTV3,2")
-                setAttribute("srcvers", "220.68")
+                setAttribute("features", "0x7") // AirPlay 1 Video + Photo (FairPlay DRM kısıtlaması olmadan)
+                setAttribute("model", "AppleTV2,1")
+                setAttribute("srcvers", "130.14")
                 setAttribute("flags", "0x4")
                 setAttribute("vv", "2")
             }
@@ -127,7 +143,7 @@ class CastServerManager(
                 override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
             })
 
-            // 2. RAOP (AirPlay Audio - Müzik) Servisi
+            // 2. RAOP (AirPlay Müzik / Ses) Servisi
             val raopService = NsdServiceInfo().apply {
                 serviceName = "${macNoColon}@$deviceName"
                 serviceType = "_raop._tcp"
@@ -150,11 +166,7 @@ class CastServerManager(
         } catch (_: Exception) {}
     }
 
-    private fun unregisterMdnsServices() {
-        try {
-            // NsdManager servisleri uygulama kapandığında veya durdurulduğunda temizlenir
-        } catch (_: Exception) {}
-    }
+    private fun unregisterMdnsServices() {}
 
     private fun startAirplayServer() {
         executor.execute {
@@ -245,6 +257,7 @@ class CastServerManager(
         body: String,
         output: OutputStream
     ) {
+        val cseq = headers["cseq"]
         when {
             path.startsWith("/server-info") || path.startsWith("/info") -> {
                 val mac = getMacAddress()
@@ -253,14 +266,14 @@ class CastServerManager(
 <plist version="1.0">
 <dict>
     <key>deviceid</key><string>$mac</string>
-    <key>features</key><integer>1518338039</integer>
-    <key>model</key><string>AppleTV3,2</string>
-    <key>protovers</key><string>1.1</string>
-    <key>srcvers</key><string>220.68</string>
+    <key>features</key><integer>7</integer>
+    <key>model</key><string>AppleTV2,1</string>
+    <key>protovers</key><string>1.0</string>
+    <key>srcvers</key><string>130.14</string>
     <key>statusFlags</key><integer>4</integer>
 </dict>
 </plist>"""
-                sendHttpResponse(output, 200, "OK", "text/x-apple-plist+xml", xmlInfo)
+                sendHttpResponse(output, 200, "OK", "text/x-apple-plist+xml", xmlInfo, cseq)
             }
             path.startsWith("/play") -> {
                 var streamUrl = ""
@@ -268,105 +281,227 @@ class CastServerManager(
                 if (body.contains("<key>Content-Location</key>")) {
                     val match = Regex("<string>(.*?)</string>").find(body)
                     if (match != null) streamUrl = match.groupValues[1]
+                } else if (body.contains("Content-Location:")) {
+                    val match = Regex("Content-Location:\\s*(.*?)\r?\n").find(body)
+                    if (match != null) streamUrl = match.groupValues[1].trim()
                 }
                 if (streamUrl.contains(".mp3") || streamUrl.contains(".m4a") || streamUrl.contains(".flac")) {
                     mediaType = "audio"
                 }
                 notifyMediaStarted(mediaType, streamUrl, "AirPlay Medyası", "Apple Cihazı", deviceName)
-                sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+                sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
             }
             path.startsWith("/rate") -> {
                 val value = Regex("value=([0-9.]+)").find(path)?.groupValues?.get(1)?.toDoubleOrNull() ?: 1.0
                 if (value == 0.0) notifyMediaPaused() else notifyMediaResumed()
-                sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+                sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
             }
             path.startsWith("/scrub") -> {
                 if (method == "GET") {
-                    sendHttpResponse(output, 200, "OK", "text/plain", "duration: 100.0\nposition: 0.0\n")
+                    sendHttpResponse(output, 200, "OK", "text/plain", "duration: 100.0\nposition: 0.0\n", cseq)
                 } else {
                     val pos = Regex("position=([0-9.]+)").find(path)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
                     notifyPositionChanged(pos, 100.0)
-                    sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+                    sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
                 }
             }
             path.startsWith("/stop") -> {
                 notifyMediaStopped()
-                sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+                sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
             }
-            path.startsWith("/setProperty") -> {
-                sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+            path.startsWith("/pair-setup") || path.startsWith("/pair-verify") -> {
+                sendHttpResponse(output, 200, "OK", "application/octet-stream", "\u0001", cseq)
             }
             else -> {
-                sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+                sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
             }
         }
     }
 
-    private fun sendHttpResponse(output: OutputStream, code: Int, status: String, contentType: String, body: String) {
+    private fun sendHttpResponse(
+        output: OutputStream,
+        code: Int,
+        status: String,
+        contentType: String,
+        body: String,
+        cseq: String? = null
+    ) {
         val bytes = body.toByteArray(Charsets.UTF_8)
-        val response = "HTTP/1.1 $code $status\r\n" +
-                "Server: AirTunes/220.68\r\n" +
+        var response = "HTTP/1.1 $code $status\r\n" +
+                "Server: AirTunes/130.14\r\n" +
                 "Content-Type: $contentType\r\n" +
-                "Content-Length: ${bytes.size}\r\n" +
-                "Connection: keep-alive\r\n\r\n"
+                "Content-Length: ${bytes.size}\r\n"
+        if (!cseq.isNullOrBlank()) {
+            response += "CSeq: $cseq\r\n"
+        }
+        response += "Connection: keep-alive\r\n\r\n"
         output.write(response.toByteArray(Charsets.UTF_8))
         output.write(bytes)
         output.flush()
     }
 
-    private fun startDlnaServer() {
+    // ----------------------------------------------------
+    // TELEFONDAN AKILLI KUMANDA & WEB REMOTE (Port 8088)
+    // ----------------------------------------------------
+    private fun startWebRemoteServer() {
         executor.execute {
             try {
-                dlnaServerSocket = ServerSocket(DLNA_PORT).apply {
+                webRemoteServerSocket = ServerSocket(WEB_REMOTE_PORT).apply {
                     reuseAddress = true
                 }
-                while (isRunning && dlnaServerSocket?.isClosed == false) {
-                    val client = dlnaServerSocket?.accept() ?: break
-                    executor.execute { handleDlnaClient(client) }
+                while (isRunning && webRemoteServerSocket?.isClosed == false) {
+                    val client = webRemoteServerSocket?.accept() ?: break
+                    executor.execute { handleWebRemoteClient(client) }
                 }
             } catch (_: Exception) {}
         }
     }
 
-    private fun handleDlnaClient(socket: Socket) {
+    private fun handleWebRemoteClient(socket: Socket) {
         try {
             val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
             val output = socket.getOutputStream()
             val requestLine = reader.readLine() ?: return
-
             val parts = requestLine.split(" ")
+            val method = if (parts.isNotEmpty()) parts[0] else "GET"
             val path = if (parts.size > 1) parts[1] else "/"
 
-            if (path == "/description.xml") {
-                val xmlDesc = """<?xml version="1.0" encoding="utf-8"?>
-<root xmlns="urn:schemas-upnp-org:device-1-0">
-  <specVersion><major>1</major><minor>0</minor></specVersion>
-  <device>
-    <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>
-    <friendlyName>$deviceName (Smart View / DLNA)</friendlyName>
-    <manufacturer>AydTV</manufacturer>
-    <modelName>AydTV Media Renderer</modelName>
-    <modelNumber>1.0</modelNumber>
-    <UDN>uuid:aydtv-${getMacAddress().replace(":", "")}</UDN>
-    <serviceList>
-      <service>
-        <serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType>
-        <serviceId>urn:upnp-org:serviceId:AVTransport</serviceId>
-        <controlURL>/AVTransport/control</controlURL>
-        <eventSubURL>/AVTransport/event</eventSubURL>
-        <SCPDURL>/AVTransport/scpd.xml</SCPDURL>
-      </service>
-    </serviceList>
-  </device>
-</root>"""
-                sendHttpResponse(output, 200, "OK", "text/xml; charset=utf-8", xmlDesc)
-            } else {
-                sendHttpResponse(output, 200, "OK", "text/plain", "OK")
+            // Header'ları tüket
+            var line = reader.readLine()
+            while (!line.isNullOrBlank()) {
+                line = reader.readLine()
+            }
+
+            when {
+                path.startsWith("/api/key") -> {
+                    val key = Regex("key=([a-zA-Z0-9_]+)").find(path)?.groupValues?.get(1) ?: "ok"
+                    mainHandler.post {
+                        channel.invokeMethod("onRemoteCommand", mapOf("action" to key))
+                    }
+                    sendHttpResponse(output, 200, "OK", "application/json", "{\"status\":\"ok\"}")
+                }
+                path.startsWith("/api/channel") -> {
+                    val num = Regex("num=([0-9]+)").find(path)?.groupValues?.get(1) ?: "1"
+                    mainHandler.post {
+                        channel.invokeMethod("onRemoteCommand", mapOf("action" to "channel_num", "value" to num))
+                    }
+                    sendHttpResponse(output, 200, "OK", "application/json", "{\"status\":\"ok\"}")
+                }
+                else -> {
+                    // Modern Cam Efektli Mobil Kumanda HTML Sayfası
+                    val html = getWebRemoteHtml()
+                    sendHttpResponse(output, 200, "OK", "text/html; charset=utf-8", html)
+                }
             }
         } catch (_: Exception) {
         } finally {
             try { socket.close() } catch (_: Exception) {}
         }
+    }
+
+    private fun getWebRemoteHtml(): String {
+        return """<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AydTV Akıllı Kumanda</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      margin: 0; padding: 16px; background: #070B12; color: #FFF;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex; flex-direction: column; align-items: center; min-height: 100vh;
+    }
+    .header { font-size: 20px; font-weight: bold; color: #00F2FE; margin-bottom: 16px; text-shadow: 0 0 10px rgba(0,242,254,0.4); }
+    .card {
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(0,242,254,0.3);
+      border-radius: 20px; padding: 16px; width: 100%; max-width: 340px;
+      backdrop-filter: blur(20px); box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+    .dpad {
+      position: relative; width: 200px; height: 200px; margin: 10px auto;
+      border-radius: 50%; background: rgba(255,255,255,0.03); border: 2px solid rgba(0,242,254,0.2);
+    }
+    .btn {
+      position: absolute; background: rgba(0,242,254,0.15); border: 1px solid rgba(0,242,254,0.5);
+      color: #FFF; font-weight: bold; font-size: 15px; border-radius: 12px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; transition: all 0.1s;
+    }
+    .btn:active { background: #00F2FE; color: #000; transform: scale(0.92); }
+    .btn-up { top: 6px; left: 65px; width: 70px; height: 48px; }
+    .btn-down { bottom: 6px; left: 65px; width: 70px; height: 48px; }
+    .btn-left { top: 65px; left: 6px; width: 48px; height: 70px; }
+    .btn-right { top: 65px; right: 6px; width: 48px; height: 70px; }
+    .btn-ok {
+      top: 65px; left: 65px; width: 70px; height: 70px; border-radius: 50%;
+      background: #00F2FE; color: #000; font-size: 17px; box-shadow: 0 0 15px rgba(0,242,254,0.5);
+    }
+    .row { display: flex; justify-content: space-between; gap: 10px; margin-top: 14px; }
+    .action-btn {
+      flex: 1; padding: 14px 8px; border-radius: 14px; background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15); color: #FFF; font-size: 14px; font-weight: 600;
+      text-align: center; cursor: pointer;
+    }
+    .action-btn:active { background: #00F2FE; color: #000; }
+    .num-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+    .num-btn {
+      padding: 12px; font-size: 16px; font-weight: bold; border-radius: 10px;
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+      color: #FFF; text-align: center; cursor: pointer;
+    }
+    .num-btn:active { background: #00F2FE; color: #000; }
+  </style>
+</head>
+<body>
+  <div class="header">📺 AydTV Akıllı Kumanda</div>
+  <div class="card">
+    <div class="row" style="margin-top:0;">
+      <div class="action-btn" onclick="send('back')">↩ Geri</div>
+      <div class="action-btn" onclick="send('settings')">⚙️ Ayarlar</div>
+    </div>
+    
+    <div class="dpad">
+      <div class="btn btn-up" onclick="send('up')">▲</div>
+      <div class="btn btn-down" onclick="send('down')">▼</div>
+      <div class="btn btn-left" onclick="send('left')">◀</div>
+      <div class="btn btn-right" onclick="send('right')">▶</div>
+      <div class="btn btn-ok" onclick="send('ok')">OK</div>
+    </div>
+
+    <div class="row">
+      <div class="action-btn" onclick="send('channel_up')">Kanal ▲</div>
+      <div class="action-btn" onclick="send('channel_down')">Kanal ▼</div>
+    </div>
+
+    <div class="num-grid">
+      <div class="num-btn" onclick="sendNum(1)">1</div>
+      <div class="num-btn" onclick="sendNum(2)">2</div>
+      <div class="num-btn" onclick="sendNum(3)">3</div>
+      <div class="num-btn" onclick="sendNum(4)">4</div>
+      <div class="num-btn" onclick="sendNum(5)">5</div>
+      <div class="num-btn" onclick="sendNum(6)">6</div>
+      <div class="num-btn" onclick="sendNum(7)">7</div>
+      <div class="num-btn" onclick="sendNum(8)">8</div>
+      <div class="num-btn" onclick="sendNum(9)">9</div>
+      <div></div>
+      <div class="num-btn" onclick="sendNum(0)">0</div>
+      <div></div>
+    </div>
+  </div>
+
+  <script>
+    function send(action) {
+      if (window.navigator.vibrate) window.navigator.vibrate(25);
+      fetch('/api/key?key=' + action, { method: 'POST' }).catch(function(){});
+    }
+    function sendNum(num) {
+      if (window.navigator.vibrate) window.navigator.vibrate(25);
+      fetch('/api/channel?num=' + num, { method: 'POST' }).catch(function(){});
+    }
+  </script>
+</body>
+</html>"""
     }
 
     fun sendRemoteCommand(action: String, value: Any? = null) {

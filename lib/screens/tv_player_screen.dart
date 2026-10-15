@@ -18,6 +18,7 @@ import '../services/cast_service.dart';
 import '../widgets/cast_toast.dart';
 import '../widgets/cast_music_view.dart';
 import '../widgets/cast_disconnect_dialog.dart';
+import '../services/sleep_timer_service.dart';
 
 class TVPlayerScreen extends StatefulWidget {
   const TVPlayerScreen({super.key});
@@ -130,6 +131,13 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
         DefaultTvDialog.checkAndShow(context);
       }
     });
+
+    SleepTimerService().onExpired = () {
+      if (!mounted) return;
+      _controller?.setVolume(0.0);
+      _controller?.pause();
+      _showToast('⏱️ Uyku Zamanlayıcı: Süre doldu, yayın duraklatıldı.');
+    };
   }
 
   void _setupCastListener() {
@@ -188,6 +196,50 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     _castService.onMediaResumed = () {
       if (!mounted) return;
       setState(() => _isCastPlaying = true);
+    };
+
+    // Telefondan Akıllı Web Kumanda Komutları
+    _castService.onRemoteCommand = (action, value) {
+      if (!mounted) return;
+      switch (action) {
+        case 'up':
+        case 'channel_up':
+          _onChannelStep(-1);
+          break;
+        case 'down':
+        case 'channel_down':
+          _onChannelStep(1);
+          break;
+        case 'left':
+          _onChannelStep(-1);
+          break;
+        case 'right':
+          _onChannelStep(1);
+          break;
+        case 'ok':
+          setState(() {
+            _isDrawerOpen = !_isDrawerOpen;
+            _showZappingBar = false;
+          });
+          break;
+        case 'back':
+          if (_isDrawerOpen) {
+            _closeDrawer();
+          } else if (_isCasting) {
+            _castService.disconnect();
+          } else {
+            _showExitDialog();
+          }
+          break;
+        case 'settings':
+          _openSettingsDialog();
+          break;
+        case 'channel_num':
+          if (value != null) {
+            _handleNumberInput(value.toString());
+          }
+          break;
+      }
     };
   }
 
@@ -302,6 +354,12 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   void _openSettingsDialog() {
     SettingsDialog.show(
       context,
+      channels: _channels,
+      onChannelsReordered: (newOrder) {
+        setState(() {
+          _channels = newOrder;
+        });
+      },
       onSettingsChanged: () {
         _loadBufferSetting();
       },

@@ -35,12 +35,22 @@ class CastService {
   VoidCallback? onMediaPaused;
   VoidCallback? onMediaResumed;
   void Function(double position, double duration)? onPositionChanged;
+  void Function(String action, dynamic value)? onRemoteCommand;
 
   bool _isServerRunning = false;
   bool get isServerRunning => _isServerRunning;
 
   CastMediaInfo? currentMedia;
   String? connectedDeviceName;
+
+  Future<String> getLocalIp() async {
+    try {
+      final ip = await _channel.invokeMethod<String>('getLocalIp');
+      return ip ?? '127.0.0.1';
+    } catch (_) {
+      return '127.0.0.1';
+    }
+  }
 
   void initialize() {
     _channel.setMethodCallHandler(_handleMethodCall);
@@ -149,6 +159,13 @@ class CastService {
         final pos = (args?['position'] as num?)?.toDouble() ?? 0.0;
         final dur = (args?['duration'] as num?)?.toDouble() ?? 100.0;
         onPositionChanged?.call(pos, dur);
+        break;
+
+      case 'onRemoteCommand':
+        final args = call.arguments as Map?;
+        final action = (args?['action'] ?? '').toString();
+        final value = args?['value'];
+        onRemoteCommand?.call(action, value);
         break;
     }
   }
