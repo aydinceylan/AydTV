@@ -1,8 +1,11 @@
 package com.aydtv.aydtv
 
+import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
+import android.text.TextUtils
 import android.view.KeyEvent
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
@@ -20,30 +23,72 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "requestDefaultTv") {
-                try {
-                    // Android TV Canlı Yayın Seçim Ekranını Tetikle
-                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                        data = Uri.parse("content://android.media.tv/passthrough/")
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    startActivity(intent)
-                    result.success(true)
-                } catch (e: Exception) {
+            when (call.method) {
+                "requestDefaultTv" -> {
                     try {
-                        val inputIntent = Intent("android.media.tv.action.VIEW_INPUTS").apply {
+                        // Android TV Canlı Yayın Seçim Ekranını Tetikle
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            data = Uri.parse("content://android.media.tv/passthrough/")
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
-                        startActivity(inputIntent)
+                        startActivity(intent)
                         result.success(true)
-                    } catch (e2: Exception) {
-                        result.error("UNAVAILABLE", "Live TV picker not available", null)
+                    } catch (e: Exception) {
+                        try {
+                            val inputIntent = Intent("android.media.tv.action.VIEW_INPUTS").apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(inputIntent)
+                            result.success(true)
+                        } catch (e2: Exception) {
+                            result.error("UNAVAILABLE", "Live TV picker not available", null)
+                        }
                     }
                 }
-            } else {
-                result.notImplemented()
+                "openAccessibilitySettings" -> {
+                    try {
+                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("ERROR", e.localizedMessage, null)
+                    }
+                }
+                "isAccessibilityEnabled" -> {
+                    result.success(isAccessibilityServiceEnabled())
+                }
+                else -> {
+                    result.notImplemented()
+                }
             }
         }
+    }
+
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        try {
+            val expectedComponentName = ComponentName(this, TvButtonAccessibilityService::class.java)
+            val enabledServicesSetting = Settings.Secure.getString(
+                contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: return false
+
+            val colonSplitter = TextUtils.SimpleStringSplitter(':')
+            colonSplitter.setString(enabledServicesSetting)
+
+            while (colonSplitter.hasNext()) {
+                val componentNameString = colonSplitter.next()
+                val enabledComponent = ComponentName.unflattenFromString(componentNameString)
+                if (enabledComponent != null && (enabledComponent == expectedComponentName ||
+                    componentNameString.contains(TvButtonAccessibilityService::class.java.simpleName))) {
+                    return true
+                }
+            }
+        } catch (e: Exception) {
+            // Hata durumunda güvenli dönüş
+        }
+        return false
     }
 
     override fun onResume() {
