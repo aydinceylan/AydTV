@@ -2,7 +2,7 @@
 
 Modern, hafif ve yüksek performanslı Android TV canlı yayın deneyimi.
 
-[![Son Sürüm](https://img.shields.io/badge/Sürüm-v1.0.14-00F5D4?style=for-the-badge&logo=android)](https://github.com/aydinceylan/AydTV/releases/latest)
+[![Son Sürüm](https://img.shields.io/badge/Sürüm-v1.0.15-00F5D4?style=for-the-badge&logo=android)](https://github.com/aydinceylan/AydTV/releases/latest)
 [![APK İndir](https://img.shields.io/badge/Doğrudan%20İndir-AydTV.apk-FF0055?style=for-the-badge&logo=googleplay)](https://github.com/aydinceylan/AydTV/releases/latest/download/AydTV.apk)
 
 ---
@@ -22,7 +22,14 @@ Arkadaşlarınız ve tüm Android TV / TV Box kullanıcıları için **bağlant�
 - **⚡ Sıfır Gecikmeli Zapping (Kanal Geçişi):** Kumanda yukarı/aşağı tuşlarına basıldığında kanal bilgisi ve HUD anında güncellenir, akış bekleme yapmadan bağlanır.
 - **🔄 Akıllı Donma Dedektörü (Auto-Recovery):** İnternet dalgalanmasında yayın donarsa sistem 3-4 saniye içinde bunu algılar ve kullanıcı kanal değiştirmek zorunda kalmadan yayını canlı uca (live edge) otomatik bağlar.
 - **🛡️ Yedek Hat Desteği (Failover):** Birincil kaynak yanıt vermediğinde sıradaki yedek akış devreye girer.
-- **📡 TV+ Canlı EPG (Elektronik Program Rehberi):** Kanallarda o an oynayan ve sıradaki programları canlı olarak ekranda gösterir.
+- **📡 TV+ Canlı EPG (Elektronik Program Rehberi):** Gece yarısı ve gün dönümü yayın akışlarını tam saatinde gösterir.
+- **⚙️ Ayarlar Menüsü:** TV açıldığında otomatik başlama, ekranı açık tutma, arka planda sesi kesme gibi ayarları yönetebileceğiniz Liquid Glass panel.
+- **🚀 Açılışta Otomatik Başlatma (Boot Start):** TV açıldığında doğrudan AydTV yayını başlar.
+- **💤 Uyku / Kapanma Koruması (Wakelock):** Yayındayken TV'nin hareketsizlik nedeniyle kapanması engellenir.
+- **🔇 Arka Plan Ses Yönetimi:** TV ana menüsüne geçildiğinde yayının sesi otomatik durur.
+- **⚡ Anlık Logo Yükleme:** Kanal logoları RAM önbelleğinde tutulur, liste açılışında loader beklemesi olmaz.
+- **🔢 Kumanda Sayı Tuşları (0-9):** Doğrudan kumandadan kanal numarası yazarak kanala atlama.
+- **⭐ Favori Kanal Yönetimi:** Sol menüden kanalları favorilere ekleme ve sadece favoriler arasında hızlı gezinme.
 - **🔢 Kumanda Sayı Tuşları (0-9):** Doğrudan kumandadan kanal numarası yazarak kanala atlama.
 - **⭐ Favori Kanal Yönetimi:** Sol menüden kanalları favorilere ekleme ve sadece favoriler arasında hızlı gezinme.
 - **📺 Android TV & Kumanda Optimizasyonu:** D-Pad odaklanması, donanımsal `MediaCodec` hafıza yönetimi ve TV uyumlu Liquid Glass arayüz.

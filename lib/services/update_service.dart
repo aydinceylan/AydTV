@@ -17,7 +17,7 @@ class UpdateInfo {
 }
 
 class UpdateService {
-  static const String currentVersion = '1.0.14';
+  static const String currentVersion = '1.0.15';
   static const String githubApiUrl =
       'https://api.github.com/repos/aydinceylan/AydTV/releases/latest';
   static const String _dismissedVersionKey = 'aydtv_dismissed_update_version';
@@ -85,7 +85,7 @@ class UpdateService {
     return OtaUpdate().execute(
       apkUrl,
       destinationFilename: 'aydtv-latest.apk',
-      androidProviderAuthority: 'com.aydtv.aydtv.provider',
+      androidProviderAuthority: 'com.aydtv.aydtv.ota_update_provider',
     );
   }
 

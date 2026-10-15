@@ -128,16 +128,12 @@ class _ChannelCardState extends State<ChannelCard> {
                       ? CachedNetworkImage(
                           imageUrl: widget.channel.logo,
                           fit: BoxFit.contain,
-                          placeholder: (context, url) => const Center(
-                            child: SizedBox(
-                              width: 12,
-                              height: 12,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 1.5,
-                                color: TVTheme.focusCyan,
-                              ),
-                            ),
-                          ),
+                          memCacheWidth: 88,
+                          memCacheHeight: 64,
+                          maxWidthDiskCache: 120,
+                          maxHeightDiskCache: 120,
+                          fadeInDuration: const Duration(milliseconds: 80),
+                          placeholder: (context, url) => const SizedBox.shrink(),
                           errorWidget: (context, url, error) => const Icon(
                             Icons.tv,
                             color: TVTheme.textSecondary,

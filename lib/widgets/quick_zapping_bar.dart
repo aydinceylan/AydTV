@@ -95,6 +95,12 @@ class QuickZappingBar extends StatelessWidget {
                     child: CachedNetworkImage(
                       imageUrl: channel.logo,
                       fit: BoxFit.contain,
+                      memCacheWidth: 112,
+                      memCacheHeight: 76,
+                      maxWidthDiskCache: 140,
+                      maxHeightDiskCache: 140,
+                      fadeInDuration: const Duration(milliseconds: 80),
+                      placeholder: (c, u) => const SizedBox.shrink(),
                       errorWidget: (c, u, e) => const Icon(Icons.tv, color: Colors.white54, size: 22),
                     ),
                   ),

@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:ota_update/ota_update.dart';
 import 'package:video_player/video_player.dart';
 import '../models/channel.dart';
 import '../services/channel_service.dart';
@@ -9,6 +11,7 @@ import '../services/update_service.dart';
 import '../theme/tv_theme.dart';
 import '../widgets/glass_drawer.dart';
 import '../widgets/quick_zapping_bar.dart';
+import '../widgets/settings_dialog.dart';
 
 class TVPlayerScreen extends StatefulWidget {
   const TVPlayerScreen({super.key});
@@ -17,7 +20,7 @@ class TVPlayerScreen extends StatefulWidget {
   State<TVPlayerScreen> createState() => _TVPlayerScreenState();
 }
 
-class _TVPlayerScreenState extends State<TVPlayerScreen> {
+class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObserver {
   final ChannelService _channelService = ChannelService();
   final UpdateService _updateService = UpdateService();
   final EpgService _epgService = EpgService();
@@ -61,6 +64,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeChannels();
     _checkAppUpdates();
     _startFreezeDetector();
@@ -71,6 +75,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _epgUpdateTimer?.cancel();
     _freezeCheckTimer?.cancel();
     _zappingBarTimer?.cancel();
@@ -79,6 +84,19 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     _controller?.dispose();
     _screenFocusNode.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // TV kumandasından Home tuşuna basıldığında veya başka uygulamaya geçildiğinde sesi kapat
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      _controller?.pause();
+    } else if (state == AppLifecycleState.resumed) {
+      _controller?.play();
+    }
   }
 
   Future<void> _initializeChannels() async {
@@ -98,6 +116,9 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       _targetChannelIndex = startIndex;
       _playChannel(channels[startIndex], startIndex);
 
+      // Logoları arka planda RAM belleğine alarak kanal listesinde anında görünmesini sağla
+      _preloadLogos(channels);
+
       // TV+ Gerçek Zamanlı EPG Bilgisini Arka Planda Çek
       _epgService.syncAllEpg(_channels, () {
         if (mounted) setState(() {});
@@ -107,12 +128,31 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     _syncChannelsInBackground();
   }
 
+  void _preloadLogos(List<Channel> channels) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (var ch in channels.take(45)) {
+        if (ch.logo.isNotEmpty && mounted) {
+          precacheImage(
+            CachedNetworkImageProvider(
+              ch.logo,
+              maxHeight: 120,
+              maxWidth: 120,
+            ),
+            context,
+          );
+        }
+      }
+    });
+  }
+
   Future<void> _syncChannelsInBackground() async {
     final updatedChannels = await _channelService.syncWithRemote();
     if (updatedChannels != null && mounted) {
       setState(() {
         _channels = updatedChannels;
       });
+      _preloadLogos(_channels);
       _epgService.syncAllEpg(_channels, () {
         if (mounted) setState(() {});
       });
@@ -124,6 +164,21 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
     if (update != null && mounted) {
       _showUpdateDialog(update);
     }
+  }
+
+  void _openSettingsDialog() {
+    SettingsDialog.show(
+      context,
+      onCheckUpdate: () async {
+        _showToast('Güncellemeler denetleniyor...');
+        final update = await _updateService.checkForUpdate();
+        if (update != null && mounted) {
+          _showUpdateDialog(update);
+        } else if (mounted) {
+          _showToast('Tebrikler! En son sürümü (v${UpdateService.currentVersion}) kullanıyorsunuz.');
+        }
+      },
+    );
   }
 
   void _showToast(String message) {
@@ -153,6 +208,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       builder: (context) {
         double downloadProgress = 0;
         bool isDownloading = false;
+        String statusText = '';
 
         return StatefulBuilder(
           builder: (context, setModalState) {
@@ -178,10 +234,15 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
                     const SizedBox(height: 14),
                   ],
                   if (isDownloading) ...[
-                    Text('İndiriliyor: %${(downloadProgress * 100).toInt()}', style: TVTheme.tvCategory),
+                    Text(
+                      statusText.isNotEmpty
+                          ? statusText
+                          : 'İndiriliyor: %${(downloadProgress * 100).toInt()}',
+                      style: TVTheme.tvCategory,
+                    ),
                     const SizedBox(height: 8),
                     LinearProgressIndicator(
-                      value: downloadProgress,
+                      value: downloadProgress > 0 ? downloadProgress : null,
                       color: TVTheme.focusCyan,
                       backgroundColor: Colors.white12,
                     ),
@@ -205,12 +266,29 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
                     onPressed: () {
                       setModalState(() {
                         isDownloading = true;
+                        statusText = 'İndirme başlatılıyor...';
                       });
-                      _updateService.startDownloadAndInstall(update.downloadUrl).listen((event) {
-                        setModalState(() {
-                          downloadProgress = (int.tryParse(event.value ?? '0') ?? 0) / 100.0;
-                        });
-                      });
+                      _updateService.startDownloadAndInstall(update.downloadUrl).listen(
+                        (event) {
+                          setModalState(() {
+                            if (event.status == OtaStatus.DOWNLOADING) {
+                              downloadProgress = (int.tryParse(event.value ?? '0') ?? 0) / 100.0;
+                              statusText = 'İndiriliyor: %${(downloadProgress * 100).toInt()}';
+                            } else if (event.status == OtaStatus.INSTALLING) {
+                              statusText = 'İndirme tamamlandı! Yükleme ekranı açılıyor...';
+                            } else if (event.status == OtaStatus.PERMISSION_NOT_GRANTED_ERROR) {
+                              statusText = 'Lütfen TV Ayarlarından Bilinmeyen Kaynaklara İzin Verin!';
+                            } else if (event.status == OtaStatus.INTERNAL_ERROR) {
+                              statusText = 'Yükleme başlatılamadı (${event.value})';
+                            }
+                          });
+                        },
+                        onError: (e) {
+                          setModalState(() {
+                            statusText = 'Hata: $e';
+                          });
+                        },
+                      );
                     },
                     child: const Text('Hemen Güncelle', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                   ),
@@ -544,6 +622,16 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
       return KeyEventResult.handled;
     }
 
+    // Kumanda Menü / Ayarlar Tuşu (Tam Ekranda Ayarları Açar)
+    if (key == LogicalKeyboardKey.contextMenu ||
+        key == LogicalKeyboardKey.settings ||
+        key == LogicalKeyboardKey.f4 ||
+        key.keyLabel.toLowerCase().contains('menu') ||
+        key.keyLabel.toLowerCase().contains('settings')) {
+      _openSettingsDialog();
+      return KeyEventResult.handled;
+    }
+
     // Menü Kapalıyken (Tam Ekran) Kumanda Mantığı
     if (key == LogicalKeyboardKey.select ||
         key == LogicalKeyboardKey.enter ||
@@ -785,6 +873,10 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> {
                   },
                   onClose: () {
                     _closeDrawer();
+                  },
+                  onOpenSettings: () {
+                    _closeDrawer();
+                    _openSettingsDialog();
                   },
                 ),
             ],

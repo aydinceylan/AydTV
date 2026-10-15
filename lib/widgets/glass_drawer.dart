@@ -12,6 +12,7 @@ class GlassDrawer extends StatefulWidget {
   final Function(Channel) onChannelSelect;
   final Function(Channel) onToggleFavorite;
   final VoidCallback onClose;
+  final VoidCallback? onOpenSettings;
 
   const GlassDrawer({
     super.key,
@@ -20,6 +21,7 @@ class GlassDrawer extends StatefulWidget {
     required this.onChannelSelect,
     required this.onToggleFavorite,
     required this.onClose,
+    this.onOpenSettings,
   });
 
   @override
@@ -270,6 +272,16 @@ class _GlassDrawerState extends State<GlassDrawer> {
             return KeyEventResult.handled;
           }
 
+          // Kumanda Menü / Ayarlar Tuşu: Ayarları Açar
+          if (key == LogicalKeyboardKey.contextMenu ||
+              key == LogicalKeyboardKey.settings ||
+              key == LogicalKeyboardKey.f4 ||
+              key.keyLabel.toLowerCase().contains('menu') ||
+              key.keyLabel.toLowerCase().contains('settings')) {
+            widget.onOpenSettings?.call();
+            return KeyEventResult.handled;
+          }
+
           return KeyEventResult.ignored;
         },
         child: Stack(
@@ -346,21 +358,44 @@ class _GlassDrawerState extends State<GlassDrawer> {
                                 ),
                               ],
                             ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: TVTheme.liquidCardBg,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.white12),
-                              ),
-                              child: Text(
-                                '${channels.length}',
-                                style: const TextStyle(
-                                  color: TVTheme.focusCyan,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: TVTheme.liquidCardBg,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.white12),
+                                  ),
+                                  child: Text(
+                                    '${channels.length}',
+                                    style: const TextStyle(
+                                      color: TVTheme.focusCyan,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                if (widget.onOpenSettings != null) ...[
+                                  const SizedBox(width: 6),
+                                  GestureDetector(
+                                    onTap: widget.onOpenSettings,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: TVTheme.liquidCardBg,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.white12),
+                                      ),
+                                      child: const Icon(
+                                        Icons.settings_rounded,
+                                        color: TVTheme.focusCyan,
+                                        size: 16,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ],
                         ),

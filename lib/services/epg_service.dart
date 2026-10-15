@@ -15,15 +15,21 @@ class EpgProgram {
   });
 
   bool isCurrent(DateTime now) {
-    return (now.isAfter(startTime) || now.isAtSameMomentAs(startTime)) &&
-        now.isBefore(endTime);
+    final nowUtc = now.toUtc();
+    final startUtc = startTime.toUtc();
+    final endUtc = endTime.toUtc();
+    return (nowUtc.isAfter(startUtc) || nowUtc.isAtSameMomentAs(startUtc)) &&
+        nowUtc.isBefore(endUtc);
   }
 
   String get timeFormatted {
-    final sH = startTime.hour.toString().padLeft(2, '0');
-    final sM = startTime.minute.toString().padLeft(2, '0');
-    final eH = endTime.hour.toString().padLeft(2, '0');
-    final eM = endTime.minute.toString().padLeft(2, '0');
+    // Türkiye Saati (UTC+3) formatlama garantisi
+    final trStart = startTime.toUtc().add(const Duration(hours: 3));
+    final trEnd = endTime.toUtc().add(const Duration(hours: 3));
+    final sH = trStart.hour.toString().padLeft(2, '0');
+    final sM = trStart.minute.toString().padLeft(2, '0');
+    final eH = trEnd.hour.toString().padLeft(2, '0');
+    final eM = trEnd.minute.toString().padLeft(2, '0');
     return '$sH:$sM - $eH:$eM';
   }
 }
@@ -121,10 +127,12 @@ class EpgService {
 
     try {
       final now = DateTime.now();
-      final year = now.year.toString();
-      final month = now.month.toString().padLeft(2, '0');
-      final day = now.day.toString().padLeft(2, '0');
-      final begintime = '$year$month${day}000000';
+      // Gece 00:00 - 03:00 arasındaki programlar dünün EPG akışında kaldığı için dünden başlatıyoruz
+      final yesterday = now.subtract(const Duration(days: 1));
+      final yYear = yesterday.year.toString();
+      final yMonth = yesterday.month.toString().padLeft(2, '0');
+      final yDay = yesterday.day.toString().padLeft(2, '0');
+      final begintime = '$yYear$yMonth${yDay}000000';
 
       final tomorrow = now.add(const Duration(days: 1));
       final tYear = tomorrow.year.toString();
