@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -239,8 +240,84 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
             _handleNumberInput(value.toString());
           }
           break;
+        case 'select_channel':
+          if (value != null) {
+            final targetId = value.toString();
+            final idx = _channels.indexWhere((c) => c.id == targetId || c.name.toLowerCase() == targetId.toLowerCase());
+            if (idx != -1) {
+              _targetChannelIndex = idx;
+              _playChannel(_channels[idx], idx);
+              _showToast('📺 Telefondan Açıldı: ${_channels[idx].name}');
+            }
+          }
+          break;
+        case 'toggle_favorite':
+          if (value != null) {
+            final targetId = value.toString();
+            final ch = _channels.firstWhere((c) => c.id == targetId, orElse: () => _channels.first);
+            if (ch.id == targetId) {
+              _channelService.toggleFavorite(ch).then((_) {
+                if (mounted) {
+                  setState(() {});
+                  _syncChannelsWithCastService();
+                  _showToast(ch.isFavorite ? '★ ${ch.name} favorilere eklendi' : '☆ ${ch.name} favorilerden çıkarıldı');
+                }
+              });
+            }
+          }
+          break;
+        case 'sleep_timer':
+          final minutes = (value is num) ? value.toInt() : (int.tryParse(value?.toString() ?? '') ?? 0);
+          if (minutes > 0) {
+            SleepTimerService().startTimer(minutes);
+            _showToast('⏱️ Uyku Zamanlayıcı: $minutes dakika ayarlandı');
+          } else {
+            SleepTimerService().cancelTimer();
+            _showToast('⏱️ Uyku Zamanlayıcı kapatıldı');
+          }
+          _syncChannelsWithCastService();
+          break;
+        case 'text_input':
+          if (value != null && value.toString().trim().isNotEmpty) {
+            _showToast('⌨️ Telefondan Metin: $value');
+          }
+          break;
+        case 'play_pause':
+          if (_controller != null) {
+            if (_controller!.value.isPlaying) {
+              _controller?.pause();
+              _showToast('⏸️ Yayın Duraklatıldı');
+            } else {
+              _controller?.play();
+              _showToast('▶️ Yayın Oynatılıyor');
+            }
+            _syncChannelsWithCastService();
+          }
+          break;
+        case 'reload':
+          if (_currentChannel != null) {
+            _playChannel(_currentChannel!, _currentChannelIndex);
+            _showToast('🔄 Yayın yeniden başlatılıyor');
+          }
+          break;
       }
     };
+  }
+
+  void _syncChannelsWithCastService() {
+    if (!mounted || _channels.isEmpty) return;
+    final list = _channels.map((c) => {
+      'id': c.id,
+      'name': c.name,
+      'logo': c.logo,
+      'isFavorite': c.isFavorite,
+    }).toList();
+    _castService.updateChannels(list);
+    _castService.updateStatus(
+      currentChannel: _currentChannel?.name,
+      sleepSeconds: SleepTimerService().remainingSeconds,
+      isPlaying: _controller?.value.isPlaying ?? true,
+    );
   }
 
   void _setupSystemChannelListener() {
@@ -308,6 +385,8 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
       _epgService.syncAllEpg(_channels, () {
         if (mounted) setState(() {});
       });
+
+      _syncChannelsWithCastService();
     }
 
     _syncChannelsInBackground();
@@ -359,6 +438,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
         setState(() {
           _channels = newOrder;
         });
+        _syncChannelsWithCastService();
       },
       onSettingsChanged: () {
         _loadBufferSetting();
@@ -588,6 +668,11 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
         });
         _stuckCounter = 0;
         _lastPosition = null;
+        _castService.updateStatus(
+          currentChannel: channel.name,
+          isPlaying: true,
+          sleepSeconds: SleepTimerService().remainingSeconds,
+        );
       }
     } catch (e) {
       // Hata veya iptal anında donanım MediaCodec kaynağını kesinlikle serbest bırak!
@@ -1147,59 +1232,10 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
                   },
                 ),
 
-              // 5. EKRAN PAYLAŞIMI / MÜZİK MODU KATMANI
+              // 5. EKRAN PAYLAŞIMI / MÜZİK MODU / FOTOĞRAF KATMANI
               if (_isCasting)
                 Positioned.fill(
-                  child: _currentCastMedia?.isAudioOnly == true
-                      ? CastMusicView(
-                          media: _currentCastMedia!,
-                          deviceName: _connectedCastDevice,
-                          isPlaying: _isCastPlaying,
-                          onTogglePlay: () {
-                            if (_isCastPlaying) {
-                              _castService.sendPause();
-                            } else {
-                              _castService.sendPlay();
-                            }
-                          },
-                          onSeekForward: () => _castService.sendSeek(10),
-                          onSeekBackward: () => _castService.sendSeek(-10),
-                          onDisconnect: () => _castService.disconnect(),
-                        )
-                      : Container(
-                          color: Colors.black,
-                          child: Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.airplay_rounded, size: 88, color: TVTheme.focusCyan),
-                                const SizedBox(height: 20),
-                                Text(
-                                  '📱 ${_connectedCastDevice ?? "Apple / Android Cihazı"}',
-                                  style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  'Kablosuz Ekran Yansıtılıyor (1080p 60 FPS)',
-                                  style: TextStyle(color: TVTheme.focusCyan, fontSize: 16),
-                                ),
-                                const SizedBox(height: 28),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white12,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: Colors.white24),
-                                  ),
-                                  child: const Text(
-                                    'TV Yayınına dönmek için kumandadan GERİ tuşuna basın',
-                                    style: TextStyle(color: Colors.white70, fontSize: 14),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                  child: _buildCastContent(),
                 ),
 
               // 6. İLK BAĞLANTI BİLDİRİMİ (Floating Toast)
@@ -1213,6 +1249,101 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCastContent() {
+    if (_currentCastMedia?.isAudioOnly == true) {
+      return CastMusicView(
+        media: _currentCastMedia!,
+        deviceName: _connectedCastDevice,
+        isPlaying: _isCastPlaying,
+        onTogglePlay: () {
+          if (_isCastPlaying) {
+            _castService.sendPause();
+          } else {
+            _castService.sendPlay();
+          }
+        },
+        onSeekForward: () => _castService.sendSeek(10),
+        onSeekBackward: () => _castService.sendSeek(-10),
+        onDisconnect: () => _castService.disconnect(),
+      );
+    }
+
+    if (_currentCastMedia?.mediaType == 'photo' && _currentCastMedia!.url.isNotEmpty) {
+      return Container(
+        color: Colors.black,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Image.file(
+              File(_currentCastMedia!.url),
+              fit: BoxFit.contain,
+              width: double.infinity,
+              height: double.infinity,
+            ),
+            Positioned(
+              top: 24,
+              right: 28,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.photo_library_rounded, color: TVTheme.focusCyan, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      '📷 ${_connectedCastDevice ?? "AirPlay"}',
+                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.airplay_rounded, size: 88, color: TVTheme.focusCyan),
+            const SizedBox(height: 20),
+            Text(
+              '📱 ${_connectedCastDevice ?? "Apple / Android Cihazı"}',
+              style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Kablosuz Ekran Yansıtılıyor (1080p 60 FPS)',
+              style: TextStyle(color: TVTheme.focusCyan, fontSize: 16),
+            ),
+            const SizedBox(height: 28),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white12,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: const Text(
+                'TV Yayınına dönmek için kumandadan GERİ tuşuna basın',
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -103,6 +104,28 @@ class CastService {
         'action': 'seek',
         'value': secondsOffset,
       });
+    } catch (_) {}
+  }
+
+  Future<void> updateChannels(List<Map<String, dynamic>> channelList) async {
+    try {
+      final json = jsonEncode(channelList);
+      await _channel.invokeMethod('updateChannels', {'json': json});
+    } catch (_) {}
+  }
+
+  Future<void> updateStatus({
+    String? currentChannel,
+    int? sleepSeconds,
+    bool? isPlaying,
+  }) async {
+    try {
+      final data = <String, dynamic>{};
+      if (currentChannel != null) data['channel'] = currentChannel;
+      if (sleepSeconds != null) data['sleep'] = sleepSeconds;
+      if (isPlaying != null) data['isPlaying'] = isPlaying;
+      final json = jsonEncode(data);
+      await _channel.invokeMethod('updateStatus', {'json': json});
     } catch (_) {}
   }
 

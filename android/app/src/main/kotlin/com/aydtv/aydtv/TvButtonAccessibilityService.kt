@@ -32,9 +32,8 @@ class TvButtonAccessibilityService : AccessibilityService() {
         }
 
         if (isTvKey) {
-
-            if (action == KeyEvent.ACTION_UP) {
-                // Yerel TV uygulamasının açılmasını tamamen engelle ve doğrudan AydTV'yi öne fırlat!
+            if (action == KeyEvent.ACTION_UP && !isAppForeground) {
+                // Sadece AydTV arka plandaysa veya TV ana menüsündeyse AydTV'yi öne fırlat!
                 val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
                 launchIntent?.apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -48,6 +47,35 @@ class TvButtonAccessibilityService : AccessibilityService() {
         }
 
         return super.onKeyEvent(event)
+    }
+
+    companion object {
+        var instance: TvButtonAccessibilityService? = null
+        var isAppForeground = false
+
+        fun performHome(): Boolean {
+            return instance?.performGlobalAction(GLOBAL_ACTION_HOME) ?: false
+        }
+
+        fun performBack(): Boolean {
+            return instance?.performGlobalAction(GLOBAL_ACTION_BACK) ?: false
+        }
+
+        fun performPowerDialog(): Boolean {
+            return instance?.performGlobalAction(GLOBAL_ACTION_POWER_DIALOG) ?: false
+        }
+    }
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        instance = this
+    }
+
+    override fun onDestroy() {
+        if (instance == this) {
+            instance = null
+        }
+        super.onDestroy()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}

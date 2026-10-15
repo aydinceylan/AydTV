@@ -92,6 +92,16 @@ class MainActivity : FlutterActivity() {
                 "getLocalIp" -> {
                     result.success(castServerManager?.getLocalIpAddress() ?: "127.0.0.1")
                 }
+                "updateChannels" -> {
+                    val json = call.argument<String>("json") ?: "[]"
+                    castServerManager?.updateChannels(json)
+                    result.success(true)
+                }
+                "updateStatus" -> {
+                    val json = call.argument<String>("json") ?: "{}"
+                    castServerManager?.updateStatus(json)
+                    result.success(true)
+                }
                 else -> {
                     result.notImplemented()
                 }
@@ -126,6 +136,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
+        TvButtonAccessibilityService.isAppForeground = true
         setKeepScreenOn()
         try {
             flutterEngine?.dartExecutor?.binaryMessenger?.let {
@@ -136,6 +147,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onPause() {
         super.onPause()
+        TvButtonAccessibilityService.isAppForeground = false
         try {
             val audioManager = getSystemService(AUDIO_SERVICE) as? android.media.AudioManager
             audioManager?.abandonAudioFocus(null)
