@@ -35,7 +35,29 @@ class CastServerManager(
     private var deviceName = "AydTV"
     private var pinEnabled = false
     private var activePinCode: String? = null
+    private var pinExpiryRunnable: Runnable? = null
     private var activeClientSocket: Socket? = null
+
+    fun showPin(clientName: String) {
+        if (activePinCode == null) {
+            activePinCode = String.format("%04d", (1000..9999).random())
+            notifyShowPinCode(activePinCode!!, clientName)
+        }
+        pinExpiryRunnable?.let { mainHandler.removeCallbacks(it) }
+        pinExpiryRunnable = Runnable {
+            hidePin()
+        }
+        mainHandler.postDelayed(pinExpiryRunnable!!, 60000)
+    }
+
+    fun hidePin() {
+        pinExpiryRunnable?.let { mainHandler.removeCallbacks(it) }
+        pinExpiryRunnable = null
+        if (activePinCode != null) {
+            notifyHidePinCode()
+            activePinCode = null
+        }
+    }
     private val activeConnections = java.util.concurrent.atomic.AtomicInteger(0)
     private var disconnectRunnable: Runnable? = null
 
@@ -169,8 +191,8 @@ class CastServerManager(
         return "93:8D:98:6C:3F:65"
     }
 
-    private fun getAirplayFeatures(): Long = if (pinEnabled) 1518338007L else 1384120311L
-    private fun getAirplayFeaturesHex(): String = if (pinEnabled) "0x5A7FFFF7,0x0" else "0x527FFFF7,0x0"
+    private fun getAirplayFeatures(): Long = 130367356919L
+    private fun getAirplayFeaturesHex(): String = "0x5A7FFFF7,0x1E"
 
     private fun getAirplayPlistXml(): String {
         val mac = getMacAddress()
@@ -185,13 +207,13 @@ class CastServerManager(
 	<key>model</key><string>AppleTV3,2</string>
 	<key>sourceVersion</key><string>220.68</string>
 	<key>protovers</key><string>1.1</string>
-	<key>statusFlags</key><integer>4</integer>
+	<key>statusFlags</key><integer>68</integer>
 	<key>features</key><integer>$feats</integer>
 	<key>vv</key><integer>2</integer>
 	<key>keepAliveLowPower</key><integer>1</integer>
 	<key>keepAliveSendStatsAsBody</key><integer>1</integer>
 	<key>pi</key><string>b08f5a79-db29-4384-b456-a4784d9e6055</string>
-	<key>pk</key><data>eXVhfKVVHelAHq9VbKzlgjRc4moreb6qFa1FuzIspxI=</data>
+	<key>pk</key><data>${CastCryptoHelper.getPublicKeyBase64()}</data>
 	<key>displays</key>
 	<array>
 		<dict>
@@ -243,10 +265,10 @@ class CastServerManager(
                 setAttribute("model", "AppleTV3,2")
                 setAttribute("srcvers", "220.68")
                 setAttribute("protovers", "1.1")
-                setAttribute("flags", "0x4")
+                setAttribute("flags", "0x44")
                 setAttribute("vv", "2")
                 setAttribute("pw", pwStr)
-                setAttribute("pk", "7975617ca5551de9401eaf556cace582345ce26a2b79beaa15ad45bb322ca712")
+                setAttribute("pk", CastCryptoHelper.getPublicKeyHex())
                 setAttribute("pi", "b08f5a79-db29-4384-b456-a4784d9e6055")
             }
 
@@ -467,10 +489,6 @@ class CastServerManager(
                 disconnectRunnable?.let { mainHandler.removeCallbacks(it) }
                 disconnectRunnable = Runnable {
                     if (activeConnections.get() <= 0) {
-                        if (activePinCode != null) {
-                            notifyHidePinCode()
-                            activePinCode = null
-                        }
                         notifyDeviceDisconnected()
                     }
                 }
@@ -508,58 +526,37 @@ class CastServerManager(
                 sendRtspResponse(output, 200, "OK", cseq, "text/x-apple-plist+xml", plist)
             }
             method in listOf("POST", "GET") && path.startsWith("/pair-pin-start") -> {
-                val pin = String.format("%04d", (1000..9999).random())
-                activePinCode = pin
-                notifyShowPinCode(pin, clientName)
+                showPin(clientName)
                 sendRtspResponse(output, 200, "OK", cseq)
+            }
+            method in listOf("POST", "GET") && path.startsWith("/pair-setup-pin") -> {
+                showPin(clientName)
+                val srpSalt = ByteArray(16) { 0x33.toByte() }
+                val srpPk = ByteArray(256) { ((it * 17 + 43) % 256).toByte() }
+                sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", srpSalt + srpPk)
             }
             method == "POST" && path.startsWith("/pair-setup") -> {
                 if (pinEnabled) {
-                    if (activePinCode == null) {
-                        activePinCode = String.format("%04d", (1000..9999).random())
-                    }
-                    notifyShowPinCode(activePinCode!!, clientName)
+                    showPin(clientName)
                 }
-                val serverPk = ByteArray(32) { ((it * 17 + 23) % 256).toByte() }
-                sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", serverPk)
+                sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", CastCryptoHelper.serverEd25519PubBytes)
             }
             method == "POST" && path.startsWith("/pair-verify") -> {
                 val isStep1 = bodyBytes.isNotEmpty() && bodyBytes[0].toInt() == 1
                 if (isStep1) {
-                    val verifyResp = ByteArray(96)
-                    for (i in 0 until 32) verifyResp[i] = ((i * 13 + 7) % 256).toByte()
-                    for (i in 32 until 96) verifyResp[i] = ((i * 31 + 41) % 256).toByte()
+                    val verifyResp = CastCryptoHelper.handlePairVerifyStep1(bodyBytes)
                     sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", verifyResp)
                 } else {
-                    if (activePinCode != null) {
-                        notifyHidePinCode()
-                        activePinCode = null
-                    }
+                    hidePin()
                     sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", ByteArray(0))
                 }
             }
             method == "POST" && path.startsWith("/fp-setup") -> {
-                if (bodyBytes.size <= 16) {
-                    val fp1 = ByteArray(142)
-                    System.arraycopy("FPLY".toByteArray(Charsets.US_ASCII), 0, fp1, 0, 4)
-                    fp1[4] = 3
-                    fp1[5] = 1
-                    for (i in 6 until 142) fp1[i] = ((i * 19 + 5) % 256).toByte()
-                    sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", fp1)
-                } else {
-                    val fp2 = ByteArray(32)
-                    System.arraycopy("FPLY".toByteArray(Charsets.US_ASCII), 0, fp2, 0, 4)
-                    fp2[4] = 3
-                    fp2[5] = 2
-                    for (i in 6 until 32) fp2[i] = ((i * 29 + 11) % 256).toByte()
-                    sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", fp2)
-                }
+                val fpResp = CastCryptoHelper.handleFairPlaySetup(bodyBytes)
+                sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", fpResp)
             }
             method == "SETUP" -> {
-                if (activePinCode != null) {
-                    notifyHidePinCode()
-                    activePinCode = null
-                }
+                hidePin()
                 notifyMediaStarted("screen", "", "Ekran Yansıtma", clientName, deviceName)
                 val transport = headers["transport"] ?: "RTP/AVP/TCP;unicast;interleaved=0-1;mode=record"
                 sendRtspResponse(
@@ -572,10 +569,7 @@ class CastServerManager(
                 )
             }
             method == "RECORD" -> {
-                if (activePinCode != null) {
-                    notifyHidePinCode()
-                    activePinCode = null
-                }
+                hidePin()
                 sendRtspResponse(
                     output, 200, "OK", cseq,
                     extraHeaders = mapOf(
@@ -588,10 +582,7 @@ class CastServerManager(
                 sendRtspResponse(output, 200, "OK", cseq)
             }
             method == "TEARDOWN" -> {
-                if (activePinCode != null) {
-                    notifyHidePinCode()
-                    activePinCode = null
-                }
+                hidePin()
                 sendRtspResponse(output, 200, "OK", cseq)
                 notifyMediaStopped()
                 notifyDeviceDisconnected()
@@ -619,58 +610,37 @@ class CastServerManager(
                 sendHttpResponse(output, 200, "OK", "text/x-apple-plist+xml", xmlInfo, cseq)
             }
             path.startsWith("/pair-pin-start") -> {
-                val pin = String.format("%04d", (1000..9999).random())
-                activePinCode = pin
-                notifyShowPinCode(pin, clientName)
+                showPin(clientName)
                 sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
+            }
+            path.startsWith("/pair-setup-pin") -> {
+                showPin(clientName)
+                val srpSalt = ByteArray(16) { 0x33.toByte() }
+                val srpPk = ByteArray(256) { ((it * 17 + 43) % 256).toByte() }
+                sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", srpSalt + srpPk, cseq)
             }
             path.startsWith("/pair-setup") -> {
                 if (pinEnabled) {
-                    if (activePinCode == null) {
-                        activePinCode = String.format("%04d", (1000..9999).random())
-                    }
-                    notifyShowPinCode(activePinCode!!, clientName)
+                    showPin(clientName)
                 }
-                val serverPk = ByteArray(32) { ((it * 17 + 23) % 256).toByte() }
-                sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", serverPk, cseq)
+                sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", CastCryptoHelper.serverEd25519PubBytes, cseq)
             }
             path.startsWith("/pair-verify") -> {
                 val isStep1 = bodyBytes.isNotEmpty() && bodyBytes[0].toInt() == 1
                 if (isStep1) {
-                    val verifyResp = ByteArray(96)
-                    for (i in 0 until 32) verifyResp[i] = ((i * 13 + 7) % 256).toByte()
-                    for (i in 32 until 96) verifyResp[i] = ((i * 31 + 41) % 256).toByte()
+                    val verifyResp = CastCryptoHelper.handlePairVerifyStep1(bodyBytes)
                     sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", verifyResp, cseq)
                 } else {
-                    if (activePinCode != null) {
-                        notifyHidePinCode()
-                        activePinCode = null
-                    }
+                    hidePin()
                     sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", ByteArray(0), cseq)
                 }
             }
             path.startsWith("/fp-setup") -> {
-                if (bodyBytes.size <= 16) {
-                    val fp1 = ByteArray(142)
-                    System.arraycopy("FPLY".toByteArray(Charsets.US_ASCII), 0, fp1, 0, 4)
-                    fp1[4] = 3
-                    fp1[5] = 1
-                    for (i in 6 until 142) fp1[i] = ((i * 19 + 5) % 256).toByte()
-                    sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", fp1, cseq)
-                } else {
-                    val fp2 = ByteArray(32)
-                    System.arraycopy("FPLY".toByteArray(Charsets.US_ASCII), 0, fp2, 0, 4)
-                    fp2[4] = 3
-                    fp2[5] = 2
-                    for (i in 6 until 32) fp2[i] = ((i * 29 + 11) % 256).toByte()
-                    sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", fp2, cseq)
-                }
+                val fpResp = CastCryptoHelper.handleFairPlaySetup(bodyBytes)
+                sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", fpResp, cseq)
             }
             path.startsWith("/play") -> {
-                if (activePinCode != null) {
-                    notifyHidePinCode()
-                    activePinCode = null
-                }
+                hidePin()
                 var streamUrl = headers["content-location"] ?: ""
                 if (streamUrl.isBlank()) {
                     if (bodyStr.contains("<key>Content-Location</key>")) {
