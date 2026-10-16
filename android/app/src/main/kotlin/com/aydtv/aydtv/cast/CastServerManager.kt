@@ -198,7 +198,7 @@ class CastServerManager(
     private fun getAirplayPlistXml(): String {
         val mac = getMacAddress()
         val feats = getAirplayFeatures()
-        val status = if (pinEnabled) 68 else 4
+        val status = if (pinEnabled) 580 else 516
         return """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -255,8 +255,26 @@ class CastServerManager(
             val macNoColon = mac.replace(":", "")
             val localIp = getLocalIpAddress()
             val featuresHex = getAirplayFeaturesHex()
-            val flagsStr = if (pinEnabled) "0x44" else "0x4"
+            val flagsStr = if (pinEnabled) "0x244" else "0x204"
             val pwStr = if (pinEnabled) "true" else "false"
+
+            val hostAddrs = mutableListOf<InetAddress>()
+            try {
+                val nifs = NetworkInterface.getNetworkInterfaces()
+                while (nifs.hasMoreElements()) {
+                    val nif = nifs.nextElement()
+                    if (nif.name.contains("wlan") || nif.name.contains("eth")) {
+                        val addrs = nif.inetAddresses
+                        while (addrs.hasMoreElements()) {
+                            val a = addrs.nextElement()
+                            if (!a.isLoopbackAddress) hostAddrs.add(a)
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+            if (hostAddrs.isEmpty()) {
+                try { hostAddrs.add(InetAddress.getByName(localIp)) } catch (_: Exception) {}
+            }
 
             // 1. Evrensel Standart AirPlay Servisi (AppleTV5,3 - Mac & iOS 14/15/16/17/18 Uyumlu)
             val airplayService = NsdServiceInfo().apply {
@@ -270,12 +288,13 @@ class CastServerManager(
                 setAttribute("protovers", "1.1")
                 setAttribute("flags", flagsStr)
                 setAttribute("vv", "2")
+                setAttribute("acl", "0")
                 setAttribute("pw", pwStr)
                 setAttribute("pk", CastCryptoHelper.getPublicKeyHex())
                 setAttribute("pi", "b08f5a79-db29-4384-b456-a4784d9e6055")
                 if (Build.VERSION.SDK_INT >= 34) {
                     try {
-                        setHostAddresses(listOf(InetAddress.getByName(localIp)))
+                        setHostAddresses(hostAddrs)
                     } catch (_: Throwable) {}
                 }
             }
@@ -315,7 +334,7 @@ class CastServerManager(
                 setAttribute("pk", CastCryptoHelper.getPublicKeyHex())
                 if (Build.VERSION.SDK_INT >= 34) {
                     try {
-                        setHostAddresses(listOf(InetAddress.getByName(localIp)))
+                        setHostAddresses(hostAddrs)
                     } catch (_: Throwable) {}
                 }
             }
@@ -586,7 +605,15 @@ class CastServerManager(
                     )
                 )
             }
-            method in listOf("GET_PARAMETER", "SET_PARAMETER", "FEEDBACK") -> {
+            method == "GET_PARAMETER" -> {
+                val resp = if (bodyStr.contains("progress")) {
+                    "progress: 0/0/0\r\n"
+                } else {
+                    "volume: 0.000000\r\n"
+                }
+                sendRtspResponse(output, 200, "OK", cseq, "text/parameters", resp.toByteArray(Charsets.UTF_8))
+            }
+            method in listOf("SET_PARAMETER", "FEEDBACK") -> {
                 sendRtspResponse(output, 200, "OK", cseq)
             }
             method == "TEARDOWN" -> {
@@ -843,7 +870,21 @@ class CastServerManager(
                     sendHttpResponse(output, 200, "OK", "application/json; charset=utf-8", channelsJson)
                 }
                 path.startsWith("/api/status") -> {
-                    sendHttpResponse(output, 200, "OK", "application/json; charset=utf-8", statusJson)
+                    val currVol = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
+                    val maxVol = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
+                    val volPct = if (maxVol > 0) ((currVol.toFloat() / maxVol) * 100).toInt() else 0
+                    val isMuted = if (Build.VERSION.SDK_INT >= 23) (audioManager?.isStreamMute(AudioManager.STREAM_MUSIC) ?: false) else (currVol == 0)
+                    val dynamicStatus = try {
+                        val obj = org.json.JSONObject(statusJson)
+                        obj.put("volume", volPct)
+                        obj.put("volumeLevel", currVol)
+                        obj.put("volumeMax", maxVol)
+                        obj.put("isMuted", isMuted)
+                        obj.toString()
+                    } catch (_: Exception) {
+                        "{\"channel\":\"AydTV\",\"sleep\":0,\"isPlaying\":true,\"volume\":$volPct,\"volumeLevel\":$currVol,\"volumeMax\":$maxVol,\"isMuted\":$isMuted}"
+                    }
+                    sendHttpResponse(output, 200, "OK", "application/json; charset=utf-8", dynamicStatus)
                 }
                 path.startsWith("/api/settings_update") -> {
                     val key = Regex("key=([^&]+)").find(path)?.groupValues?.get(1) ?: ""
@@ -1020,6 +1061,39 @@ class CastServerManager(
     .sys-btn:active { transform: scale(0.94); background: rgba(0, 229, 255, 0.2); border-color: #00E5FF; color: #00E5FF; }
     .sys-btn.danger { background: rgba(255, 68, 68, 0.12); border-color: rgba(255, 68, 68, 0.3); color: #FF5252; }
     .sys-btn.danger:active { background: #FF5252; color: #FFFFFF; }
+    .sys-btn.muted { background: rgba(255, 82, 82, 0.2) !important; border-color: #FF5252 !important; color: #FF5252 !important; box-shadow: 0 0 14px rgba(255, 82, 82, 0.35) !important; }
+
+    /* Canlı Kanal Banner */
+    .live-channel-banner {
+      width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 9px 16px; background: rgba(0, 229, 255, 0.08); border: 1px solid rgba(0, 229, 255, 0.25);
+      border-radius: 20px;
+    }
+    .channel-pulse-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: #00E5FF;
+      box-shadow: 0 0 8px #00E5FF; animation: pulse 1.8s infinite;
+    }
+    .channel-live-title { font-size: 11px; font-weight: 700; color: #64748B; letter-spacing: 0.8px; }
+    .channel-live-name { font-size: 14px; font-weight: 700; color: #00E5FF; letter-spacing: -0.2px; }
+
+    /* Ses Göstergesi */
+    .vol-status-badge {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 6px 14px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px; color: #94A3B8; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+    }
+    .vol-status-badge svg { color: #00E5FF; width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; }
+
+    /* Aktif Kanal Vurgusu */
+    .channel-item.active-playing {
+      background: rgba(0, 229, 255, 0.12) !important;
+      border: 1.5px solid #00E5FF !important;
+      box-shadow: 0 0 16px rgba(0, 229, 255, 0.25) !important;
+    }
+    .playing-badge {
+      font-size: 9px; font-weight: 800; background: #00E5FF; color: #070B14;
+      padding: 2px 7px; border-radius: 8px; margin-left: 8px; letter-spacing: 0.5px;
+    }
 
     /* D-Pad Navigasyon */
     .dpad-wrapper {
@@ -1238,14 +1312,21 @@ class CastServerManager(
             <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
             Home
           </div>
-          <div class="sys-btn" onclick="sendKey('mute')">
-            <svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
-            Mute
+          <div class="sys-btn" id="btn-mute" onclick="sendKey('mute')">
+            <svg id="mute-svg" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+            <span id="mute-label">Mute</span>
           </div>
           <div class="sys-btn" onclick="sendKey('settings')">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
             Menü
           </div>
+        </div>
+
+        <!-- Aktif İzlenen Canlı Kanal Göstergesi -->
+        <div class="live-channel-banner" id="live-channel-banner">
+          <div class="channel-pulse-dot"></div>
+          <span class="channel-live-title">YAYINDA:</span>
+          <span class="channel-live-name" id="live-channel-name">Yükleniyor...</span>
         </div>
 
         <!-- D-Pad Yön Halkası -->
@@ -1263,6 +1344,12 @@ class CastServerManager(
             <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>
           </div>
           <div class="dpad-ok" onclick="sendKey('ok')">OK</div>
+        </div>
+
+        <!-- Canlı Ses Seviyesi Göstergesi -->
+        <div class="vol-status-badge" id="vol-status-badge">
+          <svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+          <span id="vol-display-text">SES: %--</span>
         </div>
 
         <!-- Ses & Kanal Rocker Tuşları -->
@@ -1599,6 +1686,9 @@ class CastServerManager(
         });
     }
 
+    var activeChannelName = '';
+    var activeChannelId = '';
+
     function renderChannels(list) {
       var html = '';
       if (!list || list.length === 0) {
@@ -1607,10 +1697,14 @@ class CastServerManager(
         list.forEach(function(ch, idx) {
           var num = (idx + 1).toString().padStart(2, '0');
           var favClass = ch.isFavorite ? 'ch-fav active' : 'ch-fav';
-          html += '<div class="channel-item" onclick="selectChannel(\'' + ch.id + '\', \'' + ch.name.replace(/'/g, "\\'") + '\')">' +
+          var isPlaying = (activeChannelId && ch.id === activeChannelId) || (activeChannelName && ch.name.toLowerCase() === activeChannelName.toLowerCase());
+          var activeClass = isPlaying ? 'channel-item active-playing' : 'channel-item';
+          var badge = isPlaying ? '<span class="playing-badge">YAYINDA</span>' : '';
+          html += '<div class="' + activeClass + '" onclick="selectChannel(\'' + ch.id + '\', \'' + ch.name.replace(/'/g, "\\'") + '\')">' +
                     '<div class="ch-left">' +
                       '<span class="ch-num">' + num + '</span>' +
                       '<span class="ch-name">' + ch.name + '</span>' +
+                      badge +
                     '</div>' +
                     '<span class="' + favClass + '" onclick="event.stopPropagation(); toggleFav(\'' + ch.id + '\')">' +
                       '<svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>' +
@@ -1632,6 +1726,11 @@ class CastServerManager(
     function selectChannel(id, name) {
       vibrate();
       showToast('Açılıyor: ' + name);
+      activeChannelId = id;
+      activeChannelName = name;
+      var banner = document.getElementById('live-channel-name');
+      if (banner) banner.textContent = name;
+      if (channelsData && channelsData.length > 0) renderChannels(channelsData);
       fetch('/api/select_channel?id=' + encodeURIComponent(id), { method: 'POST' }).catch(function(){});
     }
 
@@ -1821,6 +1920,83 @@ class CastServerManager(
         body: JSON.stringify(ids)
       }).catch(function(){});
     }
+
+    // --- CANLI DURUM & AYARLAR SENKRONİZASYONU (1.5 SN PERİYOT) ---
+    var isPolling = false;
+
+    function pollStatusAndSettings() {
+      if (isPolling) return;
+      isPolling = true;
+
+      fetch('/api/status')
+        .then(function(res) { return res.json(); })
+        .then(function(st) {
+          if (!st) return;
+          // 1. Canlı İzlenen Kanal
+          if (st.channel) {
+            var bannerName = document.getElementById('live-channel-name');
+            if (bannerName) bannerName.textContent = st.channel;
+            if (activeChannelName !== st.channel || activeChannelId !== (st.channelId || '')) {
+              activeChannelName = st.channel;
+              activeChannelId = st.channelId || '';
+              if (channelsData && channelsData.length > 0) {
+                renderChannels(channelsData);
+              }
+            }
+          }
+          // 2. Ses Seviyesi
+          if (st.volume !== undefined) {
+            var volText = document.getElementById('vol-display-text');
+            if (volText) volText.textContent = 'SES: %' + st.volume;
+          }
+          // 3. Mute Durumu
+          var muteBtn = document.getElementById('btn-mute');
+          var muteText = document.getElementById('mute-label');
+          if (muteBtn && muteText) {
+            if (st.isMuted) {
+              muteBtn.classList.add('muted');
+              muteText.textContent = 'Sessizde';
+            } else {
+              muteBtn.classList.remove('muted');
+              muteText.textContent = 'Mute';
+            }
+          }
+        })
+        .catch(function(){});
+
+      // 4. TV Ayarları Canlı Senkronizasyonu
+      fetch('/api/settings')
+        .then(function(res) { return res.json(); })
+        .then(function(s) {
+          if (!s) return;
+          var bm = s.buffer_mode || 'balanced';
+          ['ultra', 'balanced', 'shield'].forEach(function(m) {
+            var el = document.getElementById('buf-' + m);
+            if (el) {
+              if (m === bm) el.classList.add('active'); else el.classList.remove('active');
+            }
+          });
+          if (document.getElementById('switch-keep-screen'))
+            document.getElementById('switch-keep-screen').checked = s.keep_screen_on !== false;
+          if (document.getElementById('switch-mute-bg'))
+            document.getElementById('switch-mute-bg').checked = s.mute_on_background !== false;
+          if (document.getElementById('switch-auto-boot'))
+            document.getElementById('switch-auto-boot').checked = s.auto_start_on_boot !== false;
+          if (document.getElementById('switch-cast-enabled'))
+            document.getElementById('switch-cast-enabled').checked = s.cast_enabled !== false;
+          if (document.getElementById('switch-cast-pin'))
+            document.getElementById('switch-cast-pin').checked = s.cast_pin_enabled === true;
+          updateSleepUI(s.sleep_minutes || 0);
+        })
+        .catch(function(){})
+        .finally(function() {
+          isPolling = false;
+        });
+    }
+
+    setInterval(pollStatusAndSettings, 1500);
+    pollStatusAndSettings();
+    loadChannels();
   </script>
 </body>
 </html>"""

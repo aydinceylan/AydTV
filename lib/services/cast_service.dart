@@ -118,12 +118,16 @@ class CastService {
 
   Future<void> updateStatus({
     String? currentChannel,
+    String? channelId,
+    int? channelNumber,
     int? sleepSeconds,
     bool? isPlaying,
   }) async {
     try {
       final data = <String, dynamic>{};
       if (currentChannel != null) data['channel'] = currentChannel;
+      if (channelId != null) data['channelId'] = channelId;
+      if (channelNumber != null) data['channelNumber'] = channelNumber;
       if (sleepSeconds != null) data['sleep'] = sleepSeconds;
       if (isPlaying != null) data['isPlaying'] = isPlaying;
       final json = jsonEncode(data);

@@ -467,6 +467,8 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     _castService.updateChannels(list);
     _castService.updateStatus(
       currentChannel: _currentChannel?.name,
+      channelId: _currentChannel?.id,
+      channelNumber: _currentChannel != null ? _channels.indexOf(_currentChannel!) + 1 : 1,
       sleepSeconds: SleepTimerService().remainingSeconds,
       isPlaying: _controller?.value.isPlaying ?? true,
     );
@@ -827,6 +829,8 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
           _playbackStartedAt = DateTime.now(); // İlk açılışta gereksiz dedektör tetiklenmesini önle
         _castService.updateStatus(
           currentChannel: channel.name,
+          channelId: channel.id,
+          channelNumber: _channels.indexOf(channel) + 1,
           isPlaying: true,
           sleepSeconds: SleepTimerService().remainingSeconds,
         );
