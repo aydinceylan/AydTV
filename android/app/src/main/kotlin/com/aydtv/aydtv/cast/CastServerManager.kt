@@ -27,12 +27,15 @@ class CastServerManager(
     private var multicastLock: WifiManager.MulticastLock? = null
 
     private var airplayServerSocket: ServerSocket? = null
+    private var raopServerSocket: ServerSocket? = null
     private var webRemoteServerSocket: ServerSocket? = null
 
     private var isRunning = false
     private var deviceName = "AydTV"
     private var pinEnabled = false
     private var activeClientSocket: Socket? = null
+    private val activeConnections = java.util.concurrent.atomic.AtomicInteger(0)
+    private var disconnectRunnable: Runnable? = null
 
     private var channelsJson = "[]"
     private var statusJson = "{\"channel\":\"AydTV\",\"sleep\":0,\"isPlaying\":true}"
@@ -75,14 +78,20 @@ class CastServerManager(
         unregisterMdnsServices()
         releaseMulticastLock()
 
+        disconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+        disconnectRunnable = null
+        activeConnections.set(0)
+
         try {
             activeClientSocket?.close()
             airplayServerSocket?.close()
+            raopServerSocket?.close()
             webRemoteServerSocket?.close()
         } catch (_: Exception) {}
 
         activeClientSocket = null
         airplayServerSocket = null
+        raopServerSocket = null
         webRemoteServerSocket = null
     }
 
@@ -248,11 +257,11 @@ class CastServerManager(
             airplayRegistrationListener = airplayListener
             nsdManager?.registerService(airplayService, NsdManager.PROTOCOL_DNS_SD, airplayListener)
 
-            // 2. RAOP (AirPlay Müzik / Ses) Servisi
+            // 2. RAOP (AirPlay Müzik / Ses) Servisi (Modern Apple standardı: Port 7000)
             val raopService = NsdServiceInfo().apply {
                 serviceName = "${macNoColon}@$deviceName"
                 serviceType = "_raop._tcp"
-                port = RAOP_PORT
+                port = AIRPLAY_PORT
                 setAttribute("ch", "2")
                 setAttribute("cn", "0,1,2,3")
                 setAttribute("et", "0,1")
@@ -306,6 +315,7 @@ class CastServerManager(
     }
 
     private fun startAirplayServer() {
+        // 1. Ana AirPlay Portu (Port 7000 - Video, Ekran Yansıtma, Fotoğraf & Modern RAOP)
         executor.execute {
             try {
                 airplayServerSocket = ServerSocket(AIRPLAY_PORT).apply {
@@ -317,10 +327,27 @@ class CastServerManager(
                 }
             } catch (_: Exception) {}
         }
+
+        // 2. Yedek RAOP Portu (Port 5000 - Klasik AirTunes / Ses İstemcileri İçin)
+        executor.execute {
+            try {
+                raopServerSocket = ServerSocket(RAOP_PORT).apply {
+                    reuseAddress = true
+                }
+                while (isRunning && raopServerSocket?.isClosed == false) {
+                    val client = raopServerSocket?.accept() ?: break
+                    executor.execute { handleAirplayClient(client) }
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     private fun handleAirplayClient(socket: Socket) {
         activeClientSocket = socket
+        disconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+        disconnectRunnable = null
+        activeConnections.incrementAndGet()
+
         try {
             val rawInput = socket.getInputStream()
             val output = socket.getOutputStream()
@@ -329,21 +356,21 @@ class CastServerManager(
             var clientName = "Apple Cihazı"
 
             while (isRunning && !socket.isClosed) {
-                // HTTP / RTSP Header'ları satır satır güvenle oku
+                // HTTP / RTSP Header'ları güvenli ve hızlı şekilde bayt bazlı oku
                 val headerBytes = ByteArrayOutputStream()
-                var consecutiveNewLines = 0
                 var b: Int
 
                 while (rawInput.read().also { b = it } != -1) {
                     headerBytes.write(b)
+                    val size = headerBytes.size()
                     if (b == '\n'.code) {
-                        consecutiveNewLines++
-                        val currentStr = headerBytes.toString("UTF-8")
-                        if (currentStr.endsWith("\r\n\r\n") || currentStr.endsWith("\n\n")) {
+                        val buf = headerBytes.toByteArray()
+                        if (size >= 4 && buf[size - 4] == '\r'.code.toByte() && buf[size - 3] == '\n'.code.toByte() && buf[size - 2] == '\r'.code.toByte() && buf[size - 1] == '\n'.code.toByte()) {
                             break
                         }
-                    } else if (b != '\r'.code) {
-                        consecutiveNewLines = 0
+                        if (size >= 2 && buf[size - 2] == '\n'.code.toByte() && buf[size - 1] == '\n'.code.toByte()) {
+                            break
+                        }
                     }
                 }
 
@@ -415,7 +442,16 @@ class CastServerManager(
         } catch (_: Exception) {
         } finally {
             try { socket.close() } catch (_: Exception) {}
-            notifyDeviceDisconnected()
+            val remaining = activeConnections.decrementAndGet()
+            if (remaining <= 0) {
+                disconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+                disconnectRunnable = Runnable {
+                    if (activeConnections.get() <= 0) {
+                        notifyDeviceDisconnected()
+                    }
+                }
+                mainHandler.postDelayed(disconnectRunnable!!, 3000)
+            }
         }
     }
 
@@ -452,7 +488,8 @@ class CastServerManager(
                 sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", serverPk)
             }
             method == "POST" && path.startsWith("/pair-verify") -> {
-                if (bodyBytes.size <= 68 && bodyBytes.isNotEmpty()) {
+                val isStep1 = bodyBytes.isNotEmpty() && bodyBytes[0].toInt() == 1
+                if (isStep1) {
                     val verifyResp = ByteArray(96)
                     for (i in 0 until 32) verifyResp[i] = ((i * 13 + 7) % 256).toByte()
                     for (i in 32 until 96) verifyResp[i] = ((i * 31 + 41) % 256).toByte()
@@ -485,7 +522,8 @@ class CastServerManager(
                     output, 200, "OK", cseq,
                     extraHeaders = mapOf(
                         "Transport" to transport,
-                        "Session" to "1"
+                        "Session" to "1",
+                        "Audio-Latency" to "11025"
                     )
                 )
             }
@@ -533,7 +571,8 @@ class CastServerManager(
                 sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", serverPk, cseq)
             }
             path.startsWith("/pair-verify") -> {
-                if (bodyBytes.size <= 68 && bodyBytes.isNotEmpty()) {
+                val isStep1 = bodyBytes.isNotEmpty() && bodyBytes[0].toInt() == 1
+                if (isStep1) {
                     val verifyResp = ByteArray(96)
                     for (i in 0 until 32) verifyResp[i] = ((i * 13 + 7) % 256).toByte()
                     for (i in 32 until 96) verifyResp[i] = ((i * 31 + 41) % 256).toByte()
@@ -676,10 +715,11 @@ class CastServerManager(
         sb.append("CSeq: $cseq\r\n")
         sb.append("Server: AirTunes/220.68\r\n")
         extraHeaders?.forEach { (k, v) -> sb.append("$k: $v\r\n") }
-        if (contentType != null && body != null) {
+        if (contentType != null) {
             sb.append("Content-Type: $contentType\r\n")
-            sb.append("Content-Length: ${body.size}\r\n")
         }
+        val len = body?.size ?: 0
+        sb.append("Content-Length: $len\r\n")
         sb.append("\r\n")
         output.write(sb.toString().toByteArray(Charsets.UTF_8))
         if (body != null && body.isNotEmpty()) {
