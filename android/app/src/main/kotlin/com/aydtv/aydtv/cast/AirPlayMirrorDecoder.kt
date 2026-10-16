@@ -43,8 +43,9 @@ object AirPlayMirrorDecoder {
 
     // AES-CTR Mirror Deşifreleme
     private var aesCipher: Cipher? = null
-    private var nextDecryptCount: Int = 0
-    private val ogBuffer = ByteArray(16)
+
+    val hasValidCipher: Boolean
+        get() = (aesCipher != null)
 
     private val mainHandler = Handler(Looper.getMainLooper())
     var onMirrorStateListener: ((isStarted: Boolean, textureId: Long, width: Int, height: Int) -> Unit)? = null
@@ -70,9 +71,9 @@ object AirPlayMirrorDecoder {
                 val cipher = Cipher.getInstance("AES/CTR/NoPadding")
                 cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
                 aesCipher = cipher
-                nextDecryptCount = 0
-                java.util.Arrays.fill(ogBuffer, 0.toByte())
-                Log.i(TAG, "AirPlay AES-CTR deşifreleme motoru doğrudan anahtarlarla başarıyla ilklendirildi.")
+                val keyHex = key.joinToString("") { "%02x".format(it) }
+                val ivHex = iv.joinToString("") { "%02x".format(it) }
+                Log.i(TAG, "AirPlay AES-CTR deşifreleme motoru doğrudan anahtarlarla başarıyla ilklendirildi (key=$keyHex, iv=$ivHex).")
             } catch (e: Exception) {
                 Log.w(TAG, "initAesDirect hatası: ${e.message}")
                 aesCipher = null
@@ -93,8 +94,9 @@ object AirPlayMirrorDecoder {
                 val eaesDigest = md.digest()
                 System.arraycopy(eaesDigest, 0, eaesKey, 0, minOf(64, eaesDigest.size))
 
-                val skeyall = "AirPlayStreamKey$streamConnectionId".toByteArray(Charsets.UTF_8)
-                val sivall = "AirPlayStreamIV$streamConnectionId".toByteArray(Charsets.UTF_8)
+                val streamIdStr = java.lang.Long.toUnsignedString(streamConnectionId)
+                val skeyall = "AirPlayStreamKey$streamIdStr".toByteArray(Charsets.UTF_8)
+                val sivall = "AirPlayStreamIV$streamIdStr".toByteArray(Charsets.UTF_8)
 
                 md.reset()
                 md.update(skeyall)
@@ -112,9 +114,7 @@ object AirPlayMirrorDecoder {
                 val cipher = Cipher.getInstance("AES/CTR/NoPadding")
                 cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(decryptKey, "AES"), IvParameterSpec(decryptIv))
                 aesCipher = cipher
-                nextDecryptCount = 0
-                java.util.Arrays.fill(ogBuffer, 0.toByte())
-                Log.i(TAG, "AirPlay AES-CTR deşifreleme motoru başarıyla ilklendirildi (streamId=$streamConnectionId).")
+                Log.i(TAG, "AirPlay AES-CTR deşifreleme motoru başarıyla ilklendirildi (streamId=$streamIdStr).")
             } catch (e: Exception) {
                 Log.w(TAG, "initAes hatası: ${e.message}")
                 aesCipher = null
@@ -156,8 +156,14 @@ object AirPlayMirrorDecoder {
                         }
                     }
                     0, 5 -> {
-                        // Video Frame Paketi (0: VCL slice, 5: IDR Keyframe)
+                        // Video Frame Paketi
                         if (payload.isEmpty()) return
+
+                        // UxPlay standardı: 0x05 kilit ekranı binary plist raporu olabilir
+                        if (pType == 5 && payload.size > 24000 && !isPlainH264Avcc(payload)) {
+                            Log.d(TAG, "AirPlay streaming report trailer packet skipped (size=${payload.size})")
+                            return
+                        }
 
                         // Codec hazır değilse başlatmayı dene
                         if (!isCodecRunning || mediaCodec == null) {
@@ -166,21 +172,25 @@ object AirPlayMirrorDecoder {
 
                         val c = mediaCodec ?: return
 
-                        // Akıllı H.264 şifreleme kontrolü
+                        // UxPlay standardı: packet[4]==0 && packet[5]==0x10 -> IDR Keyframe
+                        val isIdrFromHeader = (hBuf.size > 1 && (hBuf[1].toInt() and 0xFF) == 0x10)
+
+                        // Akıllı H.264 şifreleme ve deşifreleme
                         val finalPayload: ByteArray
                         if (isPlainH264Avcc(payload)) {
-                            // Paket şifresiz ham H.264 verisi
+                            // Paket doğrudan şifresiz AVCC NALU
                             finalPayload = payload
-                        } else {
-                            // Paket şifreli, AES-CTR ile deşifre etmeyi dene
-                            val decrypted = decryptPacketIfNeeded(payload)
-                            if (isPlainH264Avcc(decrypted)) {
-                                finalPayload = decrypted
+                        } else if (aesCipher != null) {
+                            // AES-CTR ile deşifre et
+                            val decrypted = decryptPacket(payload)
+                            finalPayload = if (isPlainH264Avcc(decrypted)) {
+                                decrypted
                             } else {
-                                // Deşifre anahtarı henüz eşleşmemiş veya bozuk paket;
-                                // Bozuk veriyi MediaCodec'e basıp yeşil/mor glitch oluşturmak yerine atla
-                                return
+                                // Deşifre formatı kısmi NALU olabilir, deşifre edilmiş veriyi kullan
+                                decrypted
                             }
+                        } else {
+                            finalPayload = payload
                         }
 
                         // AVCC to Annex-B dönüşümü (Zaten Annex-B değilse)
@@ -191,7 +201,7 @@ object AirPlayMirrorDecoder {
                         }
 
                         // IDR ana karesinde veya ilk karede SPS/PPS'i NAL karesinin önüne ekle
-                        val isIdr = (pType == 5) || isIdrNalu(frameAnnexB)
+                        val isIdr = isIdrFromHeader || (pType == 5) || isIdrNalu(frameAnnexB)
                         val finalFrame = if ((!hasFeedKeyframe || isIdr) && cachedSpsPps != null) {
                             val combined = ByteArray(cachedSpsPps!!.size + frameAnnexB.size)
                             System.arraycopy(cachedSpsPps!!, 0, combined, 0, cachedSpsPps!!.size)
@@ -200,6 +210,11 @@ object AirPlayMirrorDecoder {
                             combined
                         } else {
                             frameAnnexB
+                        }
+
+                        if (frameCount < 5 || isIdr) {
+                            val hexPrefix = finalPayload.take(minOf(8, finalPayload.size)).joinToString(" ") { "%02x".format(it) }
+                            Log.i(TAG, "Frame #$frameCount: pType=$pType, isIdr=$isIdr, size=${finalFrame.size}, headerHex=[$hexPrefix]")
                         }
 
                         // MediaCodec input kuyruğuna ver
@@ -256,50 +271,12 @@ object AirPlayMirrorDecoder {
         return false
     }
 
-    private fun decryptPacketIfNeeded(payload: ByteArray): ByteArray {
+    private fun decryptPacket(payload: ByteArray): ByteArray {
         val cipher = aesCipher ?: return payload
         return try {
-            val decrypted = ByteArray(payload.size)
-            var offset = 0
-
-            // 1. Önceki paketten kalan artık keystream varsa XOR'la (UxPlay standardı)
-            if (nextDecryptCount > 0) {
-                val count = minOf(nextDecryptCount, payload.size)
-                val ogStart = 16 - nextDecryptCount
-                for (i in 0 until count) {
-                    decrypted[i] = (payload[i].toInt() xor ogBuffer[ogStart + i].toInt()).toByte()
-                }
-                offset = count
-                nextDecryptCount -= count
-            }
-
-            // 2. Kalan verideki tam 16 baytlık blokları çöz
-            val remaining = payload.size - offset
-            val blocksToDecrypt = (remaining / 16) * 16
-            if (blocksToDecrypt > 0) {
-                val blockDecrypted = cipher.update(payload, offset, blocksToDecrypt)
-                if (blockDecrypted != null) {
-                    System.arraycopy(blockDecrypted, 0, decrypted, offset, blockDecrypted.size)
-                }
-                offset += blocksToDecrypt
-            }
-
-            // 3. 16'ya bölünmeyen artık baytları işle (restlen)
-            val restLen = payload.size - offset
-            if (restLen > 0) {
-                java.util.Arrays.fill(ogBuffer, 0.toByte())
-                System.arraycopy(payload, offset, ogBuffer, 0, restLen)
-                val decryptedOg = cipher.update(ogBuffer)
-                if (decryptedOg != null) {
-                    System.arraycopy(decryptedOg, 0, ogBuffer, 0, 16)
-                }
-                for (j in 0 until restLen) {
-                    decrypted[offset + j] = ogBuffer[j]
-                }
-                nextDecryptCount = 16 - restLen
-            }
-
-            decrypted
+            val out = ByteArray(payload.size)
+            val len = cipher.update(payload, 0, payload.size, out, 0)
+            if (len == payload.size) out else out.copyOfRange(0, len)
         } catch (e: Exception) {
             Log.w(TAG, "AirPlay video deşifreleme hatası: ${e.message}")
             payload

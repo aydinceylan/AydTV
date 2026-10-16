@@ -312,8 +312,9 @@ object CastCryptoHelper {
         }
 
         // Video AES-128-CTR anahtar ve IV türetimi (UxPlay / RPiPlay standardı)
-        val skeyall = "AirPlayStreamKey$streamConnectionId".toByteArray(Charsets.UTF_8)
-        val sivall = "AirPlayStreamIV$streamConnectionId".toByteArray(Charsets.UTF_8)
+        val streamIdStr = java.lang.Long.toUnsignedString(streamConnectionId)
+        val skeyall = "AirPlayStreamKey$streamIdStr".toByteArray(Charsets.UTF_8)
+        val sivall = "AirPlayStreamIV$streamIdStr".toByteArray(Charsets.UTF_8)
 
         val md = MessageDigest.getInstance("SHA-512")
         md.update(skeyall)
@@ -325,7 +326,9 @@ object CastCryptoHelper {
         md.update(finalAesKey, 0, 16)
         val videoIv = md.digest().copyOfRange(0, 16)
 
-        Log.i(TAG, "AirPlay mirror stream anahtarları başarıyla türetildi: streamId=$streamConnectionId")
+        val keyHex = videoKey.joinToString("") { "%02x".format(it) }
+        val ivHex = videoIv.joinToString("") { "%02x".format(it) }
+        Log.i(TAG, "AirPlay mirror stream anahtarları başarıyla türetildi: streamId=$streamIdStr, key=$keyHex, iv=$ivHex")
         return Pair(videoKey, videoIv)
     }
 }

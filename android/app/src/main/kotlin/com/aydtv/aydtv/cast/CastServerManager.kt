@@ -648,7 +648,11 @@ class CastServerManager(
 
                 // AirPlay AES-CTR deşifreleme motorunu FairPlay ve stream anahtarlarıyla başlat
                 try {
-                    var streamId = path.substringAfterLast("/").toLongOrNull() ?: 1L
+                    var streamId = try {
+                        java.lang.Long.parseUnsignedLong(path.substringAfterLast("/"))
+                    } catch (_: Exception) {
+                        path.substringAfterLast("/").toLongOrNull() ?: 1L
+                    }
                     var ekeyBytes: ByteArray? = null
 
                     if (bodyBytes.isNotEmpty()) {
@@ -664,7 +668,12 @@ class CastServerManager(
                                 val sDict = streams.array[0] as? com.dd.plist.NSDictionary
                                 val sIdObj = sDict?.objectForKey("streamConnectionID")
                                 if (sIdObj != null) {
-                                    val parsedId = sIdObj.toString().toLongOrNull()
+                                    val strVal = sIdObj.toString().trim()
+                                    val parsedId = try {
+                                        java.lang.Long.parseUnsignedLong(strVal)
+                                    } catch (_: Exception) {
+                                        strVal.toLongOrNull()
+                                    }
                                     if (parsedId != null && parsedId != 0L) {
                                         streamId = parsedId
                                     }
@@ -680,7 +689,7 @@ class CastServerManager(
                         val derivedKeys = CastCryptoHelper.deriveMirrorStreamKeys(ekeyBytes, streamId)
                         if (derivedKeys != null) {
                             AirPlayMirrorDecoder.initAesDirect(derivedKeys.first, derivedKeys.second)
-                            android.util.Log.i("CastServer", "FairPlay SAP v3 video deşifre motoru tam başarıyla başlatıldı (streamId=$streamId).")
+                            android.util.Log.i("CastServer", "FairPlay SAP v3 video deşifre motoru tam başarıyla başlatıldı (streamId=${java.lang.Long.toUnsignedString(streamId)}).")
                         } else {
                             val aesKey = CastCryptoHelper.lastAesKey
                             val ecdhSecret = CastCryptoHelper.lastEcdhSecret ?: ByteArray(32)
@@ -688,7 +697,8 @@ class CastServerManager(
                                 AirPlayMirrorDecoder.initAes(aesKey, ecdhSecret, streamId)
                             }
                         }
-                    } else {
+                    } else if (!AirPlayMirrorDecoder.hasValidCipher) {
+                        // Sadece video deşifre motoru henüz başlatılmamışsa yedek anahtarla dene
                         val aesKey = CastCryptoHelper.lastAesKey
                         val ecdhSecret = CastCryptoHelper.lastEcdhSecret ?: ByteArray(32)
                         if (aesKey != null) {
@@ -745,7 +755,7 @@ class CastServerManager(
                 }
                 sendRtspResponse(output, 200, "OK", cseq, "text/parameters", resp.toByteArray(Charsets.UTF_8))
             }
-            method in listOf("SET_PARAMETER", "FEEDBACK") -> {
+            method in listOf("SET_PARAMETER", "FEEDBACK") || (method == "POST" && path.startsWith("/feedback")) -> {
                 sendRtspResponse(output, 200, "OK", cseq)
             }
             method == "TEARDOWN" -> {
