@@ -9,6 +9,7 @@ import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.Looper
 import io.flutter.plugin.common.MethodChannel
+import org.json.JSONArray
 import java.io.*
 import java.net.*
 import java.util.concurrent.Executors
@@ -838,6 +839,18 @@ class CastServerManager(
                     contentLength = lp[1].trim().toIntOrNull() ?: 0
                 }
                 line = reader.readLine()
+            }
+
+            var bodyStr = ""
+            if (contentLength > 0) {
+                val buf = CharArray(contentLength)
+                var readTotal = 0
+                while (readTotal < contentLength) {
+                    val r = reader.read(buf, readTotal, contentLength - readTotal)
+                    if (r == -1) break
+                    readTotal += r
+                }
+                bodyStr = String(buf, 0, readTotal)
             }
 
             if (method == "OPTIONS") {
