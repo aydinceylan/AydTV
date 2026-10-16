@@ -68,7 +68,6 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
 
   // Otomatik Donma (Freeze / Stall) Dedektörü
   Timer? _freezeCheckTimer;
-  Duration? _lastPosition;
   int _stuckCounter = 0;
   bool _isAutoReconnecting = false;
   int _consecutiveStalls = 0;
@@ -78,6 +77,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
 
   // Yayın Kararlılık & Tamponlama Modu ('ultra', 'balanced', 'shield')
   String _bufferMode = 'balanced';
+  bool _isSettingsOpen = false;
 
   Future<void> _loadBufferSetting() async {
     final prefs = await SharedPreferences.getInstance();
@@ -85,18 +85,6 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
       setState(() {
         _bufferMode = prefs.getString('buffer_mode') ?? 'balanced';
       });
-    }
-  }
-
-  int _getBufferOffsetSeconds() {
-    switch (_bufferMode) {
-      case 'ultra':
-        return 8; // Ultra Canlı: 8 sn güvenli tampon
-      case 'shield':
-        return 25; // Zırhlı Mod: 25 sn devasa tampon
-      case 'balanced':
-      default:
-        return 16; // Dengeli & Kesintisiz: 16 sn ideal tampon
     }
   }
 
@@ -200,8 +188,58 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     };
 
     // Telefondan Akıllı Web Kumanda Komutları
+    // Telefondan Akıllı Web Kumanda Komutları
     _castService.onRemoteCommand = (action, value) {
       if (!mounted) return;
+
+      // 1. Ekranda bir modal/diyalog (Ayarlar, Çıkış vb.) açıksa D-Pad navigasyonunu o pencereye aktar
+      if (_isSettingsOpen || _isExitDialogOpen) {
+        switch (action) {
+          case 'up':
+            FocusManager.instance.primaryFocus?.focusInDirection(TraversalDirection.up);
+            return;
+          case 'down':
+            FocusManager.instance.primaryFocus?.focusInDirection(TraversalDirection.down);
+            return;
+          case 'left':
+            FocusManager.instance.primaryFocus?.focusInDirection(TraversalDirection.left);
+            return;
+          case 'right':
+            FocusManager.instance.primaryFocus?.focusInDirection(TraversalDirection.right);
+            return;
+          case 'ok':
+            final primary = FocusManager.instance.primaryFocus;
+            if (primary != null && primary.context != null) {
+              Actions.invoke(primary.context!, const ActivateIntent());
+            }
+            return;
+          case 'back':
+          case 'settings':
+            // Açık olan modal pencereyi kapat!
+            Navigator.of(context, rootNavigator: true).pop();
+            return;
+        }
+      }
+
+      // 2. Kanal Çekmecesi açıksa
+      if (_isDrawerOpen) {
+        switch (action) {
+          case 'back':
+            _closeDrawer();
+            return;
+          case 'up':
+            _onChannelStep(-1);
+            return;
+          case 'down':
+            _onChannelStep(1);
+            return;
+          case 'ok':
+            _closeDrawer();
+            return;
+        }
+      }
+
+      // 3. Normal Tam Ekran Canlı TV Modu
       switch (action) {
         case 'up':
         case 'channel_up':
@@ -219,14 +257,12 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
           break;
         case 'ok':
           setState(() {
-            _isDrawerOpen = !_isDrawerOpen;
+            _isDrawerOpen = true;
             _showZappingBar = false;
           });
           break;
         case 'back':
-          if (_isDrawerOpen) {
-            _closeDrawer();
-          } else if (_isCasting) {
+          if (_isCasting) {
             _castService.disconnect();
           } else {
             _showExitDialog();
@@ -247,7 +283,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
             if (idx != -1) {
               _targetChannelIndex = idx;
               _playChannel(_channels[idx], idx);
-              _showToast('📺 Telefondan Açıldı: ${_channels[idx].name}');
+              _showToast('Açıldı: ${_channels[idx].name}');
             }
           }
           break;
@@ -260,7 +296,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
                 if (mounted) {
                   setState(() {});
                   _syncChannelsWithCastService();
-                  _showToast(ch.isFavorite ? '★ ${ch.name} favorilere eklendi' : '☆ ${ch.name} favorilerden çıkarıldı');
+                  _showToast(ch.isFavorite ? '${ch.name} favorilere eklendi' : '${ch.name} favorilerden çıkarıldı');
                 }
               });
             }
@@ -269,27 +305,40 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
         case 'sleep_timer':
           final minutes = (value is num) ? value.toInt() : (int.tryParse(value?.toString() ?? '') ?? 0);
           if (minutes > 0) {
-            SleepTimerService().startTimer(minutes);
-            _showToast('⏱️ Uyku Zamanlayıcı: $minutes dakika ayarlandı');
+            SleepTimerService().startTimer(minutes, onTimeUp: () {
+              if (mounted) {
+                _controller?.pause();
+                _showToast('Uyku zamanı: TV yayını durduruldu.');
+              }
+            });
+            _showToast('Uyku Zamanlayıcı: $minutes dakika ayarlandı');
           } else {
             SleepTimerService().cancelTimer();
-            _showToast('⏱️ Uyku Zamanlayıcı kapatıldı');
+            _showToast('Uyku Zamanlayıcı kapatıldı');
           }
           _syncChannelsWithCastService();
+          _syncSettingsWithCastService();
           break;
         case 'text_input':
           if (value != null && value.toString().trim().isNotEmpty) {
-            _showToast('⌨️ Telefondan Metin: $value');
+            _showToast('Telefondan: $value');
+          }
+          break;
+        case 'setting_update':
+          if (value is Map) {
+            final k = value['key']?.toString() ?? '';
+            final v = value['value'];
+            _handleRemoteSettingUpdate(k, v);
           }
           break;
         case 'play_pause':
           if (_controller != null) {
             if (_controller!.value.isPlaying) {
               _controller?.pause();
-              _showToast('⏸️ Yayın Duraklatıldı');
+              _showToast('Yayın Duraklatıldı');
             } else {
               _controller?.play();
-              _showToast('▶️ Yayın Oynatılıyor');
+              _showToast('Yayın Oynatılıyor');
             }
             _syncChannelsWithCastService();
           }
@@ -297,11 +346,53 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
         case 'reload':
           if (_currentChannel != null) {
             _playChannel(_currentChannel!, _currentChannelIndex);
-            _showToast('🔄 Yayın yeniden başlatılıyor');
+            _showToast('Yayın yeniden başlatılıyor');
           }
           break;
       }
     };
+  }
+
+  Future<void> _syncSettingsWithCastService() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final settings = {
+        'buffer_mode': prefs.getString('buffer_mode') ?? 'balanced',
+        'keep_screen_on': prefs.getBool('keep_screen_on') ?? true,
+        'mute_on_background': prefs.getBool('mute_on_background') ?? true,
+        'auto_start_on_boot': prefs.getBool('auto_start_on_boot') ?? true,
+        'cast_enabled': prefs.getBool('cast_enabled') ?? true,
+        'cast_pin_enabled': prefs.getBool('cast_pin_enabled') ?? false,
+        'sleep_minutes': SleepTimerService().isActive ? (SleepTimerService().remainingSeconds ~/ 60) + 1 : 0,
+      };
+      _castService.updateSettings(settings);
+    } catch (_) {}
+  }
+
+  Future<void> _handleRemoteSettingUpdate(String key, dynamic val) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (key == 'buffer_mode') {
+      await prefs.setString('buffer_mode', val.toString());
+      _loadBufferSetting();
+      _showToast('Tampon Modu: ${val.toString().toUpperCase()}');
+    } else if (key == 'keep_screen_on') {
+      final b = val == true || val.toString() == 'true';
+      await prefs.setBool('keep_screen_on', b);
+      _showToast(b ? 'Ekran sürekli açık tutulacak' : 'Standart ekran modu');
+    } else if (key == 'mute_on_background') {
+      final b = val == true || val.toString() == 'true';
+      await prefs.setBool('mute_on_background', b);
+      _showToast(b ? 'Arka planda ses kesilecek' : 'Arka planda ses açık');
+    } else if (key == 'auto_start_on_boot') {
+      final b = val == true || val.toString() == 'true';
+      await prefs.setBool('auto_start_on_boot', b);
+      _showToast(b ? 'Açılışta otomatik başlama açık' : 'Açılışta otomatik başlama kapalı');
+    } else if (key == 'cast_enabled') {
+      final b = val == true || val.toString() == 'true';
+      await prefs.setBool('cast_enabled', b);
+      _showToast(b ? 'AirPlay / DLNA Aktif' : 'AirPlay / DLNA Kapalı');
+    }
+    _syncSettingsWithCastService();
   }
 
   void _syncChannelsWithCastService() {
@@ -431,6 +522,15 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   }
 
   void _openSettingsDialog() {
+    if (_isSettingsOpen) {
+      // Zaten açıksa kapat (üst üste açılmasını engelle / toggle)
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      return;
+    }
+    _isSettingsOpen = true;
+
     SettingsDialog.show(
       context,
       channels: _channels,
@@ -442,6 +542,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
       },
       onSettingsChanged: () {
         _loadBufferSetting();
+        _syncSettingsWithCastService();
       },
       onCheckUpdate: () async {
         _showToast('Güncellemeler denetleniyor...');
@@ -452,7 +553,14 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
           _showToast('Tebrikler! En son sürümü (v${UpdateService.currentVersion}) kullanıyorsunuz.');
         }
       },
-    );
+    ).then((_) {
+      if (mounted) {
+        setState(() {
+          _isSettingsOpen = false;
+        });
+        _screenFocusNode.requestFocus();
+      }
+    });
   }
 
   void _showToast(String message) {
@@ -601,7 +709,6 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
       _channelService.saveLastChannelId(channel.id);
       _triggerZappingBar();
       _stuckCounter = 0;
-      _lastPosition = null;
 
       final oldController = _controller;
       _controller = null;
@@ -644,21 +751,10 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
         return;
       }
 
-      // Canlı yayında geriden başlatma (Safe Live Offset):
-      // Eğer canlı akışın süresi (sliding window) varsa, en uçtan geriye çekerek tampon oluştur
-      final duration = newController.value.duration;
-      if (duration > const Duration(seconds: 35)) {
-        final offsetSeconds = _getBufferOffsetSeconds();
-        final targetPosition = duration - Duration(seconds: offsetSeconds);
-        if (targetPosition > Duration.zero) {
-          try {
-            await newController.seekTo(targetPosition);
-          } catch (_) {}
-        }
-      }
-
+      // Canlı HLS yayını doğal akışında canlı uçtan (live-edge) başlasın.
+      // Canlı yayında geriye yapay seekTo() çağırmak tamponu bozar ve 10sn sonra donma döngüsüne sokar.
       await newController.play();
-      newController.setLooping(true);
+      newController.setLooping(false); // Canlı yayında döngü (loop) KESİNLİKLE kapalı olmalı!
 
       if (mounted && thisRequestId == _playRequestId) {
         setState(() {
@@ -667,7 +763,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
           _isLoading = false;
         });
         _stuckCounter = 0;
-        _lastPosition = null;
+          _playbackStartedAt = DateTime.now(); // İlk açılışta gereksiz dedektör tetiklenmesini önle
         _castService.updateStatus(
           currentChannel: channel.name,
           isPlaying: true,
@@ -695,13 +791,15 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     }
   }
 
-  /// Canlı Yayın Donma (Stall / Freeze) Dedektörü
-  /// Ağ dalgalanmaları veya HLS manifest tıkanmalarında yayının donmasını tampon moduna göre
-  /// (6 - 14 sn) tespit eder ve kullanıcı kumandaya dokunmadan canlı uca (live edge) veya yedek hatta otomatik bağlanır.
+  DateTime? _playbackStartedAt;
+  DateTime? _lastRecoverAt;
+
+  /// Akıllı Canlı Yayın Donma (Stall / Freeze) Dedektörü
+  /// Canlı HLS akışlarında pozisyon artışı düzensiz olabileceği için yanlış pozisyon kontrolleri kaldırıldı.
+  /// Sadece gerçek durma (isBuffering veya !isPlaying veya hasError) durumlarında ve yeterli süre bekledikten sonra devreye girer.
   void _startFreezeDetector() {
     _freezeCheckTimer?.cancel();
     _stuckCounter = 0;
-    _lastPosition = null;
 
     _freezeCheckTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted ||
@@ -716,30 +814,39 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
       final val = _controller!.value;
       if (!val.isInitialized) return;
 
-      // Canlı TV yayınında takılma / donma / durma tespiti:
-      // 1) ExoPlayer buffer bekliyor (isBuffering = true)
-      // 2) Canlı TV'de pause yapılamayacağı için video oynamıyorsa (!isPlaying) doğrudan donmadır
-      // 3) Veya position son saniyede 250ms'den daha az ilerlediyse / sabit kaldıysa (freeze)
-      final bool isNotPlaying = !val.isPlaying;
-      final bool isBuffering = val.isBuffering;
-      final bool isPositionStuck = _lastPosition != null &&
-          (val.position - _lastPosition!).inMilliseconds.abs() < 250;
+      // Kanal yeni açıldıysa ilk 10 saniye dedektörü beklet (ExoPlayer tamponu kursun)
+      if (_playbackStartedAt != null &&
+          DateTime.now().difference(_playbackStartedAt!).inSeconds < 10) {
+        _stuckCounter = 0;
+        return;
+      }
 
-      final timeout = _getFreezeTimeoutSeconds();
-      if (isNotPlaying || isBuffering || isPositionStuck) {
+      // Yakın zamanda otomatik kurtarma yapıldıysa en az 20 saniye tekrar kurtarma yapma (döngüyü önle)
+      if (_lastRecoverAt != null &&
+          DateTime.now().difference(_lastRecoverAt!).inSeconds < 20) {
+        _stuckCounter = 0;
+        return;
+      }
+
+      // Canlı TV yayınında GERÇEK donma kriterleri:
+      // 1) Oynatıcı tampon bekliyor (val.isBuffering == true)
+      // 2) Veya oynatıcı durmuş ve oynamıyor (!val.isPlaying)
+      // 3) Veya hata oluşmuş (val.hasError)
+      final bool isRealStall = val.isBuffering || !val.isPlaying || val.hasError;
+
+      if (isRealStall) {
         _stuckCounter++;
-        // Seçilen tampon moduna göre (6-14 sn) donuk kaldıysa otomatik canlı uca veya yedek hatta bağlan
+        // Seçilen tampon moduna göre (10-18 sn) gerçek donma sürerse kurtar
+        final timeout = _getFreezeTimeoutSeconds() + 4; // Güvenli ek tolerans
         if (_stuckCounter >= timeout) {
           _stuckCounter = 0;
           _recoverStalledPlayback();
         }
       } else {
-        // Yayın sağlıklı akmaya devam ediyorsa sayaçları sıfırla
+        // Video oynatılıyor ve buffer beklemiyorsa donma YOKTUR!
         _stuckCounter = 0;
         _consecutiveStalls = 0;
       }
-
-      _lastPosition = val.position;
     });
   }
 
@@ -747,6 +854,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   Future<void> _recoverStalledPlayback() async {
     if (_currentChannel == null || _isAutoReconnecting || !mounted) return;
 
+    _lastRecoverAt = DateTime.now();
     _isAutoReconnecting = true;
     _consecutiveStalls++;
 
@@ -757,9 +865,9 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     int targetUrlIndex = 0;
     if (_consecutiveStalls >= 2 && ch.backupUrls.isNotEmpty) {
       targetUrlIndex = (_consecutiveStalls - 1) % (ch.backupUrls.length + 1);
-      _showToast('🔄 Alternatif yayına (${targetUrlIndex + 1}) bağlanılıyor...');
+      _showToast('Alternatif yayına (${targetUrlIndex + 1}) bağlanılıyor...');
     } else {
-      _showToast('🔄 Yayın yenileniyor, canlıya bağlanılıyor...');
+      _showToast('Yayın yenileniyor, canlıya bağlanılıyor...');
     }
 
     _playingChannelId = null; // Mevcut controller kilidini aç
@@ -767,6 +875,8 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
 
     _isAutoReconnecting = false;
   }
+
+
 
   void _triggerZappingBar() {
     _zappingBarTimer?.cancel();

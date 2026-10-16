@@ -34,6 +34,7 @@ class CastServerManager(
 
     private var channelsJson = "[]"
     private var statusJson = "{\"channel\":\"AydTV\",\"sleep\":0,\"isPlaying\":true}"
+    private var settingsJson = "{\"buffer_mode\":\"balanced\",\"keep_screen_on\":true,\"mute_on_background\":true,\"auto_start_on_boot\":true,\"cast_enabled\":true,\"sleep_minutes\":0}"
 
     companion object {
         const val AIRPLAY_PORT = 7000
@@ -47,6 +48,10 @@ class CastServerManager(
 
     fun updateStatus(json: String) {
         statusJson = json
+    }
+
+    fun updateSettings(json: String) {
+        settingsJson = json
     }
 
     fun start(customName: String = "AydTV", isPinRequired: Boolean = false) {
@@ -137,15 +142,15 @@ class CastServerManager(
             val mac = getMacAddress()
             val macNoColon = mac.replace(":", "")
 
-            // 1. Standart AirPlay Servisi (Tüm iOS cihazlarıyla uyumlu Ekran Yansıtma, HLS Video & Fotoğraf)
+            // 1. Evrensel Standart AirPlay Servisi (Tüm iOS cihazlarıyla tam uyumlu Video, Fotoğraf & Müzik)
             val airplayService = NsdServiceInfo().apply {
                 serviceName = deviceName
                 serviceType = "_airplay._tcp"
                 port = AIRPLAY_PORT
                 setAttribute("deviceid", mac)
-                setAttribute("features", "0x5A7FFFF7,0x1E") // Ekran Yansıtma (Mirroring) + Video + Photo + Slideshow
-                setAttribute("model", "AppleTV3,1")
-                setAttribute("srcvers", "220.68")
+                setAttribute("features", "0x1E") // 0x1E: Pair-Setup DRM gerektirmeyen şifresiz Video + Photo + Audio
+                setAttribute("model", "AppleTV2,1")
+                setAttribute("srcvers", "150.33")
                 setAttribute("protovers", "1.0")
                 setAttribute("flags", "0x4")
                 setAttribute("vv", "2")
@@ -200,16 +205,38 @@ class CastServerManager(
     private fun handleAirplayClient(socket: Socket) {
         activeClientSocket = socket
         try {
-            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+            val rawInput = socket.getInputStream()
             val output = socket.getOutputStream()
 
             var deviceDetected = false
             var clientName = "Apple Cihazı"
 
             while (isRunning && !socket.isClosed) {
-                val requestLine = reader.readLine() ?: break
-                if (requestLine.isBlank()) continue
+                // HTTP / RTSP Header'ları satır satır güvenle oku
+                val headerBytes = ByteArrayOutputStream()
+                var consecutiveNewLines = 0
+                var b: Int
 
+                while (rawInput.read().also { b = it } != -1) {
+                    headerBytes.write(b)
+                    if (b == '\n'.code) {
+                        consecutiveNewLines++
+                        val currentStr = headerBytes.toString("UTF-8")
+                        if (currentStr.endsWith("\r\n\r\n") || currentStr.endsWith("\n\n")) {
+                            break
+                        }
+                    } else if (b != '\r'.code) {
+                        consecutiveNewLines = 0
+                    }
+                }
+
+                if (headerBytes.size() == 0) break
+
+                val headerText = headerBytes.toString("UTF-8")
+                val lines = headerText.split("\r\n", "\n")
+                if (lines.isEmpty() || lines[0].isBlank()) continue
+
+                val requestLine = lines[0].trim()
                 val parts = requestLine.split(" ")
                 val method = if (parts.isNotEmpty()) parts[0].uppercase() else "GET"
                 val path = if (parts.size > 1) parts[1] else "/"
@@ -217,9 +244,10 @@ class CastServerManager(
 
                 val headers = mutableMapOf<String, String>()
                 var contentLength = 0
-                var line = reader.readLine()
-                while (!line.isNullOrBlank()) {
-                    val headerParts = line.split(":", limit = 2)
+
+                for (i in 1 until lines.size) {
+                    val l = lines[i]
+                    val headerParts = l.split(":", limit = 2)
                     if (headerParts.size == 2) {
                         val key = headerParts[0].trim().lowercase()
                         val value = headerParts[1].trim()
@@ -237,20 +265,22 @@ class CastServerManager(
                             clientName = value
                         }
                     }
-                    line = reader.readLine()
                 }
 
-                var body = ""
+                // Body'yi byte bazlı güvenle oku (Fotoğraf ve Video binary bozulmasını engeller)
+                val bodyBytes = ByteArray(contentLength)
                 if (contentLength > 0) {
-                    val charArray = CharArray(contentLength)
-                    var readSoFar = 0
-                    while (readSoFar < contentLength) {
-                        val read = reader.read(charArray, readSoFar, contentLength - readSoFar)
+                    var bytesRead = 0
+                    while (bytesRead < contentLength) {
+                        val read = rawInput.read(bodyBytes, bytesRead, contentLength - bytesRead)
                         if (read == -1) break
-                        readSoFar += read
+                        bytesRead += read
                     }
-                    body = String(charArray, 0, readSoFar)
                 }
+
+                val bodyStr = if (contentLength > 0 && contentLength < 32768) {
+                    try { String(bodyBytes, Charsets.UTF_8) } catch (_: Exception) { "" }
+                } else ""
 
                 if (!deviceDetected) {
                     deviceDetected = true
@@ -260,9 +290,9 @@ class CastServerManager(
                 val cseq = headers["cseq"] ?: "0"
 
                 if (isRtsp) {
-                    handleRtspRequest(method, path, headers, body, output, cseq, clientName)
+                    handleRtspRequest(method, path, headers, bodyStr, output, cseq, clientName)
                 } else {
-                    handleAirplayHttpRequest(method, path, headers, body, output, cseq, clientName)
+                    handleAirplayHttpRequest(method, path, headers, bodyBytes, bodyStr, output, cseq, clientName)
                 }
             }
         } catch (_: Exception) {
@@ -285,8 +315,8 @@ class CastServerManager(
             "OPTIONS" -> {
                 val resp = "RTSP/1.0 200 OK\r\n" +
                         "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/220.68\r\n" +
-                        "Public: ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, TEARDOWN, OPTIONS, GET_PARAMETER, SET_PARAMETER, POST, GET, PUT\r\n\r\n"
+                        "Server: AirTunes/150.33\r\n" +
+                        "Public: ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, TEARDOWN, OPTIONS, GET_PARAMETER, SET_PARAMETER, POST, GET\r\n\r\n"
                 output.write(resp.toByteArray(Charsets.UTF_8))
                 output.flush()
             }
@@ -294,17 +324,16 @@ class CastServerManager(
                 notifyDeviceConnected(clientName, "airplay")
                 val resp = "RTSP/1.0 200 OK\r\n" +
                         "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/220.68\r\n\r\n"
+                        "Server: AirTunes/150.33\r\n\r\n"
                 output.write(resp.toByteArray(Charsets.UTF_8))
                 output.flush()
             }
             "SETUP" -> {
-                // iPhone Ekran Yansıtma akışı başladı!
                 notifyMediaStarted("screen", "", "Ekran Yansıtma", clientName, deviceName)
                 val transport = headers["transport"] ?: "RTP/AVP/TCP;unicast;interleaved=0-1;mode=record"
                 val resp = "RTSP/1.0 200 OK\r\n" +
                         "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/220.68\r\n" +
+                        "Server: AirTunes/150.33\r\n" +
                         "Transport: $transport\r\n" +
                         "Session: 1\r\n\r\n"
                 output.write(resp.toByteArray(Charsets.UTF_8))
@@ -313,7 +342,7 @@ class CastServerManager(
             "RECORD" -> {
                 val resp = "RTSP/1.0 200 OK\r\n" +
                         "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/220.68\r\n" +
+                        "Server: AirTunes/150.33\r\n" +
                         "Session: 1\r\n\r\n"
                 output.write(resp.toByteArray(Charsets.UTF_8))
                 output.flush()
@@ -321,32 +350,23 @@ class CastServerManager(
             "GET_PARAMETER", "SET_PARAMETER" -> {
                 val resp = "RTSP/1.0 200 OK\r\n" +
                         "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/220.68\r\n\r\n"
+                        "Server: AirTunes/150.33\r\n\r\n"
                 output.write(resp.toByteArray(Charsets.UTF_8))
                 output.flush()
             }
             "TEARDOWN" -> {
                 val resp = "RTSP/1.0 200 OK\r\n" +
                         "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/220.68\r\n\r\n"
+                        "Server: AirTunes/150.33\r\n\r\n"
                 output.write(resp.toByteArray(Charsets.UTF_8))
                 output.flush()
                 notifyMediaStopped()
                 notifyDeviceDisconnected()
             }
-            "POST" -> {
-                val resp = "RTSP/1.0 200 OK\r\n" +
-                        "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/220.68\r\n" +
-                        "Content-Type: application/octet-stream\r\n" +
-                        "Content-Length: 1\r\n\r\n\u0001"
-                output.write(resp.toByteArray(Charsets.UTF_8))
-                output.flush()
-            }
             else -> {
                 val resp = "RTSP/1.0 200 OK\r\n" +
                         "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/220.68\r\n\r\n"
+                        "Server: AirTunes/150.33\r\n\r\n"
                 output.write(resp.toByteArray(Charsets.UTF_8))
                 output.flush()
             }
@@ -357,7 +377,8 @@ class CastServerManager(
         method: String,
         path: String,
         headers: Map<String, String>,
-        body: String,
+        bodyBytes: ByteArray,
+        bodyStr: String,
         output: OutputStream,
         cseq: String,
         clientName: String
@@ -370,10 +391,10 @@ class CastServerManager(
 <plist version="1.0">
 <dict>
     <key>deviceid</key><string>$mac</string>
-    <key>features</key><integer>14839</integer>
-    <key>model</key><string>AppleTV3,1</string>
+    <key>features</key><integer>30</integer>
+    <key>model</key><string>AppleTV2,1</string>
     <key>protovers</key><string>1.0</string>
-    <key>srcvers</key><string>220.68</string>
+    <key>srcvers</key><string>150.33</string>
     <key>statusFlags</key><integer>4</integer>
 </dict>
 </plist>"""
@@ -382,11 +403,11 @@ class CastServerManager(
             path.startsWith("/play") -> {
                 var streamUrl = headers["content-location"] ?: ""
                 if (streamUrl.isBlank()) {
-                    if (body.contains("<key>Content-Location</key>")) {
-                        val match = Regex("<string>(.*?)</string>").find(body)
+                    if (bodyStr.contains("<key>Content-Location</key>")) {
+                        val match = Regex("<string>(.*?)</string>").find(bodyStr)
                         if (match != null) streamUrl = match.groupValues[1]
-                    } else if (body.contains("Content-Location:")) {
-                        val match = Regex("Content-Location:\\s*(.*?)\r?\n").find(body)
+                    } else if (bodyStr.contains("Content-Location:")) {
+                        val match = Regex("Content-Location:\\s*(.*?)\r?\n").find(bodyStr)
                         if (match != null) streamUrl = match.groupValues[1].trim()
                     }
                 }
@@ -400,7 +421,7 @@ class CastServerManager(
             path.startsWith("/photo") -> {
                 try {
                     val photoFile = File(context.cacheDir, "airplay_photo.jpg")
-                    photoFile.writeBytes(body.toByteArray(Charsets.ISO_8859_1))
+                    photoFile.writeBytes(bodyBytes)
                     notifyMediaStarted("photo", photoFile.absolutePath, "AirPlay Fotoğrafı", clientName, deviceName)
                 } catch (_: Exception) {}
                 sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
@@ -424,7 +445,7 @@ class CastServerManager(
                 sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
             }
             path.startsWith("/pair-setup") || path.startsWith("/pair-verify") -> {
-                sendHttpResponse(output, 200, "OK", "application/octet-stream", "\u0001", cseq)
+                sendHttpResponse(output, 200, "OK", "application/octet-stream", "", cseq)
             }
             else -> {
                 sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
@@ -442,7 +463,7 @@ class CastServerManager(
     ) {
         val bytes = body.toByteArray(Charsets.UTF_8)
         var response = "HTTP/1.1 $code $status\r\n" +
-                "Server: AirTunes/220.68\r\n" +
+                "Server: AirTunes/150.33\r\n" +
                 "Content-Type: $contentType\r\n" +
                 "Content-Length: ${bytes.size}\r\n" +
                 "Access-Control-Allow-Origin: *\r\n" +
@@ -485,7 +506,12 @@ class CastServerManager(
 
             // Header'ları oku
             var line = reader.readLine()
+            var contentLength = 0
             while (!line.isNullOrBlank()) {
+                val lp = line.split(":", limit = 2)
+                if (lp.size == 2 && lp[0].trim().equals("content-length", ignoreCase = true)) {
+                    contentLength = lp[1].trim().toIntOrNull() ?: 0
+                }
                 line = reader.readLine()
             }
 
@@ -500,6 +526,18 @@ class CastServerManager(
                 }
                 path.startsWith("/api/status") -> {
                     sendHttpResponse(output, 200, "OK", "application/json; charset=utf-8", statusJson)
+                }
+                path.startsWith("/api/settings_update") -> {
+                    val key = Regex("key=([^&]+)").find(path)?.groupValues?.get(1) ?: ""
+                    val rawVal = Regex("val=([^&]+)").find(path)?.groupValues?.get(1) ?: ""
+                    val value = try { URLDecoder.decode(rawVal, "UTF-8") } catch (_: Exception) { rawVal }
+                    mainHandler.post {
+                        channel.invokeMethod("onRemoteCommand", mapOf("action" to "setting_update", "value" to mapOf("key" to key, "value" to value)))
+                    }
+                    sendHttpResponse(output, 200, "OK", "application/json", "{\"status\":\"ok\"}")
+                }
+                path.startsWith("/api/settings") -> {
+                    sendHttpResponse(output, 200, "OK", "application/json; charset=utf-8", settingsJson)
                 }
                 path.startsWith("/api/key") -> {
                     val key = Regex("key=([a-zA-Z0-9_]+)").find(path)?.groupValues?.get(1) ?: "ok"
@@ -593,201 +631,281 @@ class CastServerManager(
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>AydTV Akıllı Kumanda</title>
+  <meta name="theme-color" content="#070A12">
+  <title>AydTV Kumanda</title>
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; margin: 0; padding: 0; }
     body {
-      background: #080D1A; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding-bottom: 75px; user-select: none;
+      background: #070A12; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding-bottom: 85px; user-select: none;
+      -webkit-font-smoothing: antialiased;
     }
-    /* Üst Header */
+
+    /* Üst Bar */
     .top-bar {
-      width: 100%; max-width: 420px; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center;
-      background: rgba(13, 22, 38, 0.85); backdrop-filter: blur(15px); border-bottom: 1px solid rgba(0, 242, 254, 0.2);
-      position: sticky; top: 0; z-index: 100;
+      width: 100%; max-width: 440px; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center;
+      background: rgba(12, 17, 28, 0.88); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08); position: sticky; top: 0; z-index: 100;
     }
-    .brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 17px; color: #00F2FE; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; letter-spacing: -0.3px; color: #FFFFFF; }
+    .brand-logo { width: 22px; height: 22px; color: #00E5FF; }
     .status-badge {
-      display: flex; align-items: center; gap: 6px; font-size: 12px; background: rgba(0, 255, 136, 0.12);
-      border: 1px solid rgba(0, 255, 136, 0.3); padding: 4px 10px; border-radius: 20px; color: #00FF88;
+      display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+      background: rgba(0, 230, 255, 0.08); border: 1px solid rgba(0, 230, 255, 0.25);
+      padding: 5px 12px; border-radius: 20px; color: #00E5FF;
     }
-    .dot { width: 7px; height: 7px; border-radius: 50%; background: #00FF88; box-shadow: 0 0 8px #00FF88; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #00E5FF; box-shadow: 0 0 8px #00E5FF; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
     /* Ana Konteyner */
-    .container { width: 100%; max-width: 420px; padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
-    .tab-content { width: 100%; display: none; flex-direction: column; align-items: center; gap: 14px; }
+    .container { width: 100%; max-width: 440px; padding: 16px 18px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+    .tab-content { width: 100%; display: none; flex-direction: column; align-items: center; gap: 16px; }
     .tab-content.active { display: flex; }
 
     /* Kumanda Gövdesi */
     .remote-body {
-      width: 100%; max-width: 350px; background: linear-gradient(165deg, #121A29 0%, #0A101D 100%);
-      border: 1px solid rgba(0, 242, 254, 0.25); border-radius: 36px; padding: 22px 18px;
-      box-shadow: 0 16px 40px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.1);
-      display: flex; flex-direction: column; align-items: center; gap: 18px;
+      width: 100%; max-width: 360px; background: linear-gradient(180deg, #101624 0%, #0A0E18 100%);
+      border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 40px; padding: 22px 18px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.65), inset 0 1px 1px rgba(255,255,255,0.1);
+      display: flex; flex-direction: column; align-items: center; gap: 20px;
     }
 
     /* Üst Sistem Tuşları */
     .btn-row { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
     .sys-btn {
-      flex: 1; height: 46px; border-radius: 14px; background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.12); color: #FFF; font-size: 13px; font-weight: 600;
-      display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; transition: all 0.15s;
+      flex: 1; height: 48px; border-radius: 16px; background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08); color: #E0E6ED; font-size: 13px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; transition: all 0.15s;
     }
-    .sys-btn:active { transform: scale(0.93); background: rgba(0,242,254,0.25); border-color: #00F2FE; }
-    .sys-btn.danger { background: rgba(255, 68, 68, 0.15); border-color: rgba(255, 68, 68, 0.4); color: #FF6666; }
-    .sys-btn.danger:active { background: #FF4444; color: #FFF; }
+    .sys-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .sys-btn:active { transform: scale(0.94); background: rgba(0, 229, 255, 0.2); border-color: #00E5FF; color: #00E5FF; }
+    .sys-btn.danger { background: rgba(255, 68, 68, 0.12); border-color: rgba(255, 68, 68, 0.3); color: #FF5252; }
+    .sys-btn.danger:active { background: #FF5252; color: #FFFFFF; }
 
     /* D-Pad Navigasyon */
     .dpad-wrapper {
-      position: relative; width: 220px; height: 220px; border-radius: 50%;
-      background: radial-gradient(circle, #1A2438 0%, #0D1424 100%);
-      border: 2px solid rgba(0, 242, 254, 0.25); box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      position: relative; width: 230px; height: 230px; border-radius: 50%;
+      background: radial-gradient(circle, #172134 0%, #0C1220 100%);
+      border: 2px solid rgba(255, 255, 255, 0.1); box-shadow: 0 12px 30px rgba(0,0,0,0.5);
     }
     .dpad-btn {
-      position: absolute; color: #A0C4E8; font-size: 18px; display: flex; align-items: center; justify-content: center;
+      position: absolute; color: #94A3B8; display: flex; align-items: center; justify-content: center;
       cursor: pointer; transition: all 0.1s;
     }
-    .dpad-btn:active { color: #00F2FE; text-shadow: 0 0 10px #00F2FE; }
-    .dpad-up { top: 6px; left: 75px; width: 70px; height: 50px; }
-    .dpad-down { bottom: 6px; left: 75px; width: 70px; height: 50px; }
-    .dpad-left { top: 75px; left: 6px; width: 50px; height: 70px; }
-    .dpad-right { top: 75px; right: 6px; width: 50px; height: 70px; }
+    .dpad-btn svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+    .dpad-btn:active { color: #00E5FF; transform: scale(0.92); }
+    .dpad-up { top: 6px; left: 75px; width: 80px; height: 55px; }
+    .dpad-down { bottom: 6px; left: 75px; width: 80px; height: 55px; }
+    .dpad-left { top: 75px; left: 6px; width: 55px; height: 80px; }
+    .dpad-right { top: 75px; right: 6px; width: 55px; height: 80px; }
     .dpad-ok {
-      position: absolute; top: 68px; left: 68px; width: 84px; height: 84px; border-radius: 50%;
-      background: linear-gradient(135deg, #00F2FE 0%, #0088FF 100%); color: #070B14;
-      font-weight: 800; font-size: 19px; display: flex; align-items: center; justify-content: center;
-      cursor: pointer; box-shadow: 0 0 20px rgba(0, 242, 254, 0.45); transition: all 0.15s;
+      position: absolute; top: 71px; left: 71px; width: 88px; height: 88px; border-radius: 50%;
+      background: linear-gradient(135deg, #00E5FF 0%, #0077FF 100%); color: #050B14;
+      font-weight: 800; font-size: 19px; letter-spacing: 0.5px; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; box-shadow: 0 0 24px rgba(0, 229, 255, 0.45); transition: all 0.15s;
     }
-    .dpad-ok:active { transform: scale(0.92); box-shadow: 0 0 30px rgba(0, 242, 254, 0.8); }
+    .dpad-ok:active { transform: scale(0.92); box-shadow: 0 0 35px rgba(0, 229, 255, 0.8); }
 
     /* Ses ve Kanal Rocker Tuşları */
-    .rocker-section { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 0 8px; }
+    .rocker-section { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 0 6px; }
     .rocker-pill {
-      width: 64px; height: 120px; border-radius: 32px; background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(0, 242, 254, 0.2); display: flex; flex-direction: column; overflow: hidden;
+      width: 66px; height: 130px; border-radius: 33px; background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; overflow: hidden;
     }
     .rocker-btn {
-      flex: 1; display: flex; align-items: center; justify-content: center; color: #FFF; font-weight: bold; font-size: 14px;
-      cursor: pointer; transition: background 0.1s;
+      flex: 1; display: flex; align-items: center; justify-content: center; color: #E2E8F0;
+      cursor: pointer; transition: background 0.12s;
     }
-    .rocker-btn:active { background: rgba(0, 242, 254, 0.3); color: #00F2FE; }
-    .rocker-label { font-size: 10px; color: #7A8EA8; text-align: center; line-height: 1; }
+    .rocker-btn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .rocker-btn:active { background: rgba(0, 229, 255, 0.25); color: #00E5FF; }
+    .rocker-label { font-size: 10px; font-weight: 700; color: #64748B; text-align: center; letter-spacing: 0.5px; line-height: 1; }
 
-    .center-actions { display: flex; flex-direction: column; gap: 12px; }
+    .center-actions { display: flex; flex-direction: column; gap: 14px; }
     .round-btn {
-      width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center;
-      font-size: 17px; cursor: pointer; transition: all 0.15s;
+      width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center;
+      color: #E2E8F0; cursor: pointer; transition: all 0.15s;
     }
-    .round-btn:active { transform: scale(0.9); background: #00F2FE; color: #000; }
+    .round-btn svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .round-btn:active { transform: scale(0.92); background: #00E5FF; color: #070B14; }
 
-    /* Metin Girişi / Klavye Kutusu */
+    /* Metin Girişi Kutusu */
     .keyboard-box {
-      width: 100%; background: rgba(255,255,255,0.03); border: 1px solid rgba(0,242,254,0.2);
-      border-radius: 16px; padding: 10px; display: flex; gap: 8px; align-items: center;
+      width: 100%; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 18px; padding: 6px 10px; display: flex; gap: 8px; align-items: center;
     }
+    .keyboard-icon { width: 20px; height: 20px; color: #64748B; flex-shrink: 0; margin-left: 4px; }
     .keyboard-input {
-      flex: 1; background: transparent; border: none; color: #FFF; font-size: 14px; padding: 6px;
+      flex: 1; background: transparent; border: none; color: #FFFFFF; font-size: 14px; padding: 8px 4px;
     }
-    .keyboard-input::placeholder { color: #5A7090; }
+    .keyboard-input::placeholder { color: #475569; }
     .send-text-btn {
-      padding: 8px 14px; border-radius: 10px; background: #00F2FE; color: #070B14;
-      font-weight: 700; font-size: 12px; border: none; cursor: pointer;
+      padding: 9px 16px; border-radius: 12px; background: #00E5FF; color: #070B14;
+      font-weight: 700; font-size: 12px; border: none; cursor: pointer; transition: all 0.15s;
     }
     .send-text-btn:active { transform: scale(0.94); }
 
     /* Numpad Izgarası */
-    .numpad-container { width: 100%; display: none; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 6px; }
+    .numpad-container { width: 100%; display: none; grid-template-columns: repeat(3, 1fr); gap: 8px; }
     .num-key {
-      padding: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 12px; font-size: 16px; font-weight: bold; text-align: center; cursor: pointer;
+      padding: 13px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px; font-size: 17px; font-weight: 700; text-align: center; cursor: pointer; transition: all 0.12s;
     }
-    .num-key:active { background: #00F2FE; color: #000; }
+    .num-key:active { background: #00E5FF; color: #070B14; transform: scale(0.94); }
 
     /* Kanallar Sekmesi */
     .search-box {
-      width: 100%; background: rgba(255,255,255,0.06); border: 1px solid rgba(0,242,254,0.3);
-      border-radius: 14px; padding: 12px 14px; display: flex; align-items: center; gap: 10px;
+      width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px; padding: 12px 16px; display: flex; align-items: center; gap: 10px;
     }
-    .search-input {
-      flex: 1; background: transparent; border: none; color: #FFF; font-size: 15px;
-    }
+    .search-icon { width: 18px; height: 18px; color: #64748B; flex-shrink: 0; }
+    .search-input { flex: 1; background: transparent; border: none; color: #FFFFFF; font-size: 15px; }
     .channel-list { width: 100%; display: flex; flex-direction: column; gap: 8px; }
     .channel-item {
-      display: flex; align-items: center; justify-content: space-between; padding: 12px 14px;
-      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 14px; cursor: pointer; transition: all 0.15s;
+      display: flex; align-items: center; justify-content: space-between; padding: 14px 16px;
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px; cursor: pointer; transition: all 0.15s;
     }
-    .channel-item:active { background: rgba(0, 242, 254, 0.15); border-color: #00F2FE; }
-    .ch-left { display: flex; align-items: center; gap: 12px; }
-    .ch-num { font-size: 13px; font-weight: 700; color: #00F2FE; width: 28px; }
-    .ch-name { font-size: 15px; font-weight: 600; }
-    .ch-fav { font-size: 18px; color: #556677; padding: 4px; cursor: pointer; }
-    .ch-fav.active { color: #FFB300; text-shadow: 0 0 10px rgba(255,179,0,0.6); }
+    .channel-item:active { background: rgba(0, 229, 255, 0.15); border-color: #00E5FF; }
+    .ch-left { display: flex; align-items: center; gap: 14px; }
+    .ch-num { font-size: 13px; font-weight: 700; color: #00E5FF; width: 28px; }
+    .ch-name { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
+    .ch-fav { width: 22px; height: 22px; color: #475569; padding: 2px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .ch-fav.active { color: #FFB300; }
+    .ch-fav svg { width: 100%; height: 100%; stroke: currentColor; fill: none; stroke-width: 2; }
+    .ch-fav.active svg { fill: #FFB300; }
 
-    /* Uyku Zamanlayıcı Sekmesi */
-    .card-settings {
-      width: 100%; background: linear-gradient(165deg, #121A29 0%, #0A101D 100%);
-      border: 1px solid rgba(0, 242, 254, 0.25); border-radius: 24px; padding: 20px;
+    /* Ayarlar Sekmesi */
+    .settings-card {
+      width: 100%; background: linear-gradient(180deg, #101624 0%, #0A0E18 100%);
+      border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 24px; padding: 18px;
       display: flex; flex-direction: column; gap: 14px;
     }
-    .card-title { font-size: 16px; font-weight: 700; color: #00F2FE; display: flex; align-items: center; gap: 8px; }
-    .timer-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-    .timer-btn {
-      padding: 14px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
-      color: #FFF; font-size: 14px; font-weight: 600; text-align: center; cursor: pointer;
-    }
-    .timer-btn:active { background: #00F2FE; color: #000; }
-    .timer-btn.cancel { grid-column: span 2; background: rgba(255,68,68,0.15); border-color: rgba(255,68,68,0.4); color: #FF6666; }
+    .card-head { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; color: #00E5FF; }
+    .card-head svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; }
+    .card-desc { font-size: 12px; color: #8F9CAE; line-height: 1.4; }
 
-    /* Alt Sabit Navigasyon Çubuğu */
+    /* Ayar Satırları & Switch */
+    .setting-row {
+      display: flex; justify-content: space-between; align-items: center; padding: 12px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .setting-row:last-child { border-bottom: none; }
+    .setting-info { display: flex; flex-direction: column; gap: 2px; }
+    .setting-title { font-size: 14px; font-weight: 600; color: #FFFFFF; }
+    .setting-sub { font-size: 11px; color: #718096; }
+
+    /* Switch Bileşeni */
+    .switch {
+      position: relative; width: 46px; height: 26px; display: inline-block; flex-shrink: 0;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background-color: rgba(255,255,255,0.15); border-radius: 26px; transition: .25s;
+    }
+    .slider:before {
+      position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px;
+      background-color: white; border-radius: 50%; transition: .25s;
+    }
+    input:checked + .slider { background-color: #00E5FF; }
+    input:checked + .slider:before { transform: translateX(20px); background-color: #050B14; }
+
+    /* Segmentli Buton Grubu (Tampon Modu) */
+    .segment-group {
+      display: flex; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px; padding: 4px; gap: 4px;
+    }
+    .segment-btn {
+      flex: 1; padding: 10px 4px; font-size: 12px; font-weight: 600; text-align: center;
+      border-radius: 10px; cursor: pointer; color: #8F9CAE; transition: all 0.15s;
+    }
+    .segment-btn.active { background: #00E5FF; color: #050B14; font-weight: 700; box-shadow: 0 2px 10px rgba(0,229,255,0.3); }
+
+    /* Uyku Grid */
+    .timer-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .timer-btn {
+      padding: 12px 6px; border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+      color: #E2E8F0; font-size: 13px; font-weight: 600; text-align: center; cursor: pointer; transition: all 0.12s;
+    }
+    .timer-btn:active { background: #00E5FF; color: #050B14; }
+    .timer-btn.cancel { grid-column: span 3; background: rgba(255,68,68,0.12); border-color: rgba(255,68,68,0.3); color: #FF5252; }
+    .timer-btn.cancel:active { background: #FF5252; color: #FFF; }
+
+    /* Alt Sabit Navigasyon */
     .bottom-nav {
-      position: fixed; bottom: 0; width: 100%; max-width: 420px; height: 65px;
-      background: rgba(10, 16, 28, 0.95); backdrop-filter: blur(20px);
-      border-top: 1px solid rgba(0, 242, 254, 0.2); display: flex; justify-content: space-around; align-items: center; z-index: 100;
+      position: fixed; bottom: 0; width: 100%; max-width: 440px; height: 72px;
+      background: rgba(10, 14, 24, 0.94); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+      border-top: 1px solid rgba(255, 255, 255, 0.08); display: flex; justify-content: space-around; align-items: center; z-index: 100;
     }
     .nav-item {
-      display: flex; flex-direction: column; align-items: center; gap: 4px; color: #7A8EA8;
-      font-size: 11px; font-weight: 600; cursor: pointer; transition: color 0.15s;
+      display: flex; flex-direction: column; align-items: center; gap: 4px; color: #64748B;
+      font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s;
     }
-    .nav-item.active { color: #00F2FE; }
-    .nav-icon { font-size: 20px; }
+    .nav-item svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .nav-item.active { color: #00E5FF; }
 
     /* Bildirim Toast */
     .toast {
-      position: fixed; top: 70px; background: #00F2FE; color: #070B14; font-weight: 700;
-      font-size: 13px; padding: 10px 18px; border-radius: 20px; box-shadow: 0 4px 20px rgba(0,242,254,0.5);
-      z-index: 200; opacity: 0; transform: translateY(-10px); transition: all 0.2s; pointer-events: none;
+      position: fixed; top: 74px; background: #00E5FF; color: #050B14; font-weight: 700;
+      font-size: 13px; padding: 10px 20px; border-radius: 20px; box-shadow: 0 6px 25px rgba(0,229,255,0.4);
+      z-index: 200; opacity: 0; transform: translateY(-8px); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); pointer-events: none;
     }
     .toast.show { opacity: 1; transform: translateY(0); }
   </style>
 </head>
 <body>
   <div class="top-bar">
-    <div class="brand">📺 AydTV Kumanda</div>
-    <div class="status-badge"><span class="dot"></span> TV Bağlı</div>
+    <div class="brand">
+      <svg class="brand-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect>
+        <polyline points="17 2 12 7 7 2"></polyline>
+      </svg>
+      AydTV Akıllı Kumanda
+    </div>
+    <div class="status-badge"><span class="status-dot"></span> TV Bağlı</div>
   </div>
 
-  <div id="toast" class="toast">Komut gönderildi</div>
+  <div id="toast" class="toast">Komut iletildi</div>
 
   <div class="container">
     <!-- 1. SEKME: KUMANDA -->
     <div id="tab-remote" class="tab-content active">
       <div class="remote-body">
+        <!-- Güç, Home, Mute, Ayarlar -->
         <div class="btn-row">
-          <div class="sys-btn danger" onclick="sendKey('power')">🔴 Güç</div>
-          <div class="sys-btn" onclick="sendKey('home')">🏠 Home</div>
-          <div class="sys-btn" onclick="sendKey('mute')">🔇 Mute</div>
-          <div class="sys-btn" onclick="sendKey('settings')">⚙️ Ayarlar</div>
+          <div class="sys-btn danger" onclick="sendKey('power')">
+            <svg viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
+            Güç
+          </div>
+          <div class="sys-btn" onclick="sendKey('home')">
+            <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+            Home
+          </div>
+          <div class="sys-btn" onclick="sendKey('mute')">
+            <svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+            Mute
+          </div>
+          <div class="sys-btn" onclick="sendKey('settings')">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            Menü
+          </div>
         </div>
 
-        <!-- D-Pad -->
+        <!-- D-Pad Yön Halkası -->
         <div class="dpad-wrapper">
-          <div class="dpad-btn dpad-up" onclick="sendKey('up')">▲</div>
-          <div class="dpad-btn dpad-down" onclick="sendKey('down')">▼</div>
-          <div class="dpad-btn dpad-left" onclick="sendKey('left')">◀</div>
-          <div class="dpad-btn dpad-right" onclick="sendKey('right')">▶</div>
+          <div class="dpad-btn dpad-up" onclick="sendKey('up')">
+            <svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"></polyline></svg>
+          </div>
+          <div class="dpad-btn dpad-down" onclick="sendKey('down')">
+            <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+          <div class="dpad-btn dpad-left" onclick="sendKey('left')">
+            <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          </div>
+          <div class="dpad-btn dpad-right" onclick="sendKey('right')">
+            <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </div>
           <div class="dpad-ok" onclick="sendKey('ok')">OK</div>
         </div>
 
@@ -795,36 +913,64 @@ class CastServerManager(
         <div class="rocker-section">
           <!-- Ses Rocker -->
           <div class="rocker-pill">
-            <div class="rocker-btn" onclick="sendKey('vol_up')">+</div>
+            <div class="rocker-btn" onclick="sendKey('vol_up')">
+              <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </div>
             <div class="rocker-label">SES</div>
-            <div class="rocker-btn" onclick="sendKey('vol_down')">-</div>
+            <div class="rocker-btn" onclick="sendKey('vol_down')">
+              <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </div>
           </div>
 
-          <!-- Orta Eylemler -->
+          <!-- Orta Eylemler (Geri & Play/Pause) -->
           <div class="center-actions">
-            <div class="round-btn" onclick="sendKey('back')">↩</div>
-            <div class="round-btn" onclick="sendKey('play_pause')">⏯️</div>
+            <div class="round-btn" onclick="sendKey('back')">
+              <svg viewBox="0 0 24 24"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
+            </div>
+            <div class="round-btn" onclick="sendKey('play_pause')">
+              <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            </div>
           </div>
 
           <!-- Kanal Rocker -->
           <div class="rocker-pill">
-            <div class="rocker-btn" onclick="sendKey('channel_up')">▲</div>
+            <div class="rocker-btn" onclick="sendKey('channel_up')">
+              <svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"></polyline></svg>
+            </div>
             <div class="rocker-label">KANAL</div>
-            <div class="rocker-btn" onclick="sendKey('channel_down')">▼</div>
+            <div class="rocker-btn" onclick="sendKey('channel_down')">
+              <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
           </div>
         </div>
 
-        <!-- TV'ye Metin / Klavye Gönderme -->
+        <!-- TV'ye Metin Girişi -->
         <div class="keyboard-box">
-          <input type="text" id="tvTextInput" class="keyboard-input" placeholder="⌨️ TV'ye metin yaz..." onkeydown="if(event.key==='Enter') sendText()">
+          <svg class="keyboard-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
+            <line x1="6" y1="8" x2="6" y2="8"></line>
+            <line x1="10" y1="8" x2="10" y2="8"></line>
+            <line x1="14" y1="8" x2="14" y2="8"></line>
+            <line x1="18" y1="8" x2="18" y2="8"></line>
+            <line x1="6" y1="12" x2="6" y2="12"></line>
+            <line x1="10" y1="12" x2="10" y2="12"></line>
+            <line x1="14" y1="12" x2="14" y2="12"></line>
+            <line x1="18" y1="12" x2="18" y2="12"></line>
+            <line x1="7" y1="16" x2="17" y2="16"></line>
+          </svg>
+          <input type="text" id="tvTextInput" class="keyboard-input" placeholder="TV'ye metin yaz..." onkeydown="if(event.key==='Enter') sendText()">
           <button class="send-text-btn" onclick="sendText()">Gönder</button>
         </div>
 
-        <!-- Numpad Toggle & Grid -->
+        <!-- Sayı Tuş Takımı Aç/Kapa Butonu -->
         <div class="btn-row" style="margin-top:-6px;">
-          <div class="sys-btn" onclick="toggleNumpad()">🔢 Sayı Tuş Takımı</div>
+          <div class="sys-btn" onclick="toggleNumpad()">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+            Sayı Tuşları
+          </div>
         </div>
 
+        <!-- Sayısal Tuş Takımı -->
         <div id="numpad" class="numpad-container">
           <div class="num-key" onclick="sendNum(1)">1</div>
           <div class="num-key" onclick="sendNum(2)">2</div>
@@ -845,52 +991,135 @@ class CastServerManager(
     <!-- 2. SEKME: KANALLAR -->
     <div id="tab-channels" class="tab-content">
       <div class="search-box">
-        <input type="text" id="channelSearch" class="search-input" placeholder="🔍 Kanal ara..." oninput="filterChannels()">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="channelSearch" class="search-input" placeholder="Kanal ara..." oninput="filterChannels()">
       </div>
       <div id="channelList" class="channel-list">
-        <div style="text-align:center; color:#7A8EA8; padding:30px;">Kanallar yükleniyor...</div>
+        <div style="text-align:center; color:#64748B; padding:30px;">Kanallar yükleniyor...</div>
       </div>
     </div>
 
-    <!-- 3. SEKME: UYKU & AYARLAR -->
+    <!-- 3. SEKME: AYARLAR (AydTV Üzerindeki Tüm Ayarlar) -->
     <div id="tab-settings" class="tab-content">
-      <div class="card-settings">
-        <div class="card-title">⏱️ Uyku Zamanlayıcı</div>
-        <p style="font-size:13px; color:#A0C4E8;">Seçtiğiniz süre dolduğunda TV yayını ve sesi otomatik kapanır.</p>
-        <div class="timer-grid">
-          <div class="timer-btn" onclick="setSleep(15)">15 Dakika</div>
-          <div class="timer-btn" onclick="setSleep(30)">30 Dakika</div>
-          <div class="timer-btn" onclick="setSleep(45)">45 Dakika</div>
-          <div class="timer-btn" onclick="setSleep(60)">60 Dakika</div>
-          <div class="timer-btn" onclick="setSleep(90)">90 Dakika</div>
-          <div class="timer-btn" onclick="setSleep(120)">120 Dakika</div>
-          <div class="timer-btn cancel" onclick="setSleep(0)">🛑 Zamanlayıcıyı Kapat</div>
+      <!-- Tampon & Yayın Kararlılığı -->
+      <div class="settings-card">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+          Yayın Tamponlama Modu
+        </div>
+        <div class="card-desc">İnternet hızınıza göre canlı TV akışının kararlılığını optimize edin.</div>
+        <div class="segment-group">
+          <div id="buf-ultra" class="segment-btn" onclick="updateSetting('buffer_mode', 'ultra')">Ultra (8s)</div>
+          <div id="buf-balanced" class="segment-btn active" onclick="updateSetting('buffer_mode', 'balanced')">Dengeli (16s)</div>
+          <div id="buf-shield" class="segment-btn" onclick="updateSetting('buffer_mode', 'shield')">Zırhlı (25s)</div>
         </div>
       </div>
 
-      <div class="card-settings">
-        <div class="card-title">⚡ Hızlı TV Kontrolleri</div>
+      <!-- Ekran ve Sistem Tercihleri -->
+      <div class="settings-card">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect><polyline points="17 2 12 7 7 2"></polyline></svg>
+          Ekran & Sistem Seçenekleri
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-title">Ekranı Sürekli Açık Tut</span>
+            <span class="setting-sub">Yayın esnasında ekran kapanmasını önler</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="switch-keep-screen" onchange="updateSetting('keep_screen_on', this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-title">Arka Plana Geçince Sesi Durdur</span>
+            <span class="setting-sub">TV ana menüsünde yayının sesini keser</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="switch-mute-bg" onchange="updateSetting('mute_on_background', this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-title">TV Açıldığında Otomatik Başlat</span>
+            <span class="setting-sub">Televizyon açılır açılmaz yayına geçer</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="switch-auto-boot" onchange="updateSetting('auto_start_on_boot', this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-title">AirPlay & DLNA Paylaşımı</span>
+            <span class="setting-sub">Kablosuz medya alıcısını etkin tutar</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="switch-cast-enabled" onchange="updateSetting('cast_enabled', this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Uyku Zamanlayıcı Kartı -->
+      <div class="settings-card">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          Uyku Zamanlayıcısı
+        </div>
+        <div class="card-desc">Süre dolduğunda TV yayını ve sesi otomatik durdurulur.</div>
+        <div class="timer-grid">
+          <div class="timer-btn" onclick="setSleep(15)">15 Dk</div>
+          <div class="timer-btn" onclick="setSleep(30)">30 Dk</div>
+          <div class="timer-btn" onclick="setSleep(45)">45 Dk</div>
+          <div class="timer-btn" onclick="setSleep(60)">60 Dk</div>
+          <div class="timer-btn" onclick="setSleep(90)">90 Dk</div>
+          <div class="timer-btn" onclick="setSleep(120)">120 Dk</div>
+          <div class="timer-btn cancel" onclick="setSleep(0)">Zamanlayıcıyı Kapat</div>
+        </div>
+      </div>
+
+      <!-- Hızlı Kontroller -->
+      <div class="settings-card">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+          Hızlı Kontroller
+        </div>
         <div class="btn-row">
-          <div class="sys-btn" onclick="sendKey('reload')">🔄 Yayını Yenile</div>
-          <div class="sys-btn" onclick="sendKey('settings')">⚙️ Menüyü Aç</div>
+          <div class="sys-btn" onclick="sendKey('reload')">
+            <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+            Yayını Yenile
+          </div>
+          <div class="sys-btn" onclick="sendKey('settings')">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            TV Ayar Menüsü
+          </div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Alt Menü -->
+  <!-- Sabit Alt Menü: Kumanda / Kanallar / Ayarlar -->
   <div class="bottom-nav">
     <div class="nav-item active" onclick="switchTab('remote', this)">
-      <div class="nav-icon">🎮</div>
+      <svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="4"></rect><circle cx="12" cy="7" r="1"></circle><circle cx="12" cy="11" r="1"></circle><circle cx="12" cy="15" r="1"></circle><circle cx="12" cy="18" r="1"></circle></svg>
       <div>Kumanda</div>
     </div>
     <div class="nav-item" onclick="switchTab('channels', this)">
-      <div class="nav-icon">📺</div>
+      <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect><polyline points="17 2 12 7 7 2"></polyline></svg>
       <div>Kanallar</div>
     </div>
     <div class="nav-item" onclick="switchTab('settings', this)">
-      <div class="nav-icon">⏱️</div>
-      <div>Uyku</div>
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      <div>Ayarlar</div>
     </div>
   </div>
 
@@ -954,6 +1183,8 @@ class CastServerManager(
       el.classList.add('active');
       if (tabId === 'channels' && channelsData.length === 0) {
         loadChannels();
+      } else if (tabId === 'settings') {
+        loadSettings();
       }
     }
 
@@ -972,7 +1203,7 @@ class CastServerManager(
     function renderChannels(list) {
       var html = '';
       if (!list || list.length === 0) {
-        html = '<div style="text-align:center; color:#7A8EA8; padding:30px;">Kanal bulunamadı.</div>';
+        html = '<div style="text-align:center; color:#64748B; padding:30px;">Kanal bulunamadı.</div>';
       } else {
         list.forEach(function(ch, idx) {
           var num = (idx + 1).toString().padStart(2, '0');
@@ -982,7 +1213,9 @@ class CastServerManager(
                       '<span class="ch-num">' + num + '</span>' +
                       '<span class="ch-name">' + ch.name + '</span>' +
                     '</div>' +
-                    '<span class="' + favClass + '" onclick="event.stopPropagation(); toggleFav(\'' + ch.id + '\')">★</span>' +
+                    '<span class="' + favClass + '" onclick="event.stopPropagation(); toggleFav(\'' + ch.id + '\')">' +
+                      '<svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>' +
+                    '</span>' +
                   '</div>';
         });
       }
@@ -1011,6 +1244,48 @@ class CastServerManager(
         renderChannels(channelsData);
       }
       fetch('/api/toggle_favorite?id=' + encodeURIComponent(id), { method: 'POST' }).catch(function(){});
+    }
+
+    function loadSettings() {
+      fetch('/api/settings')
+        .then(function(res) { return res.json(); })
+        .then(function(s) {
+          if (!s) return;
+          // Tampon Modu
+          var bm = s.buffer_mode || 'balanced';
+          ['ultra', 'balanced', 'shield'].forEach(function(m) {
+            var el = document.getElementById('buf-' + m);
+            if (el) {
+              if (m === bm) el.classList.add('active'); else el.classList.remove('active');
+            }
+          });
+          // Switch'ler
+          if (document.getElementById('switch-keep-screen'))
+            document.getElementById('switch-keep-screen').checked = s.keep_screen_on !== false;
+          if (document.getElementById('switch-mute-bg'))
+            document.getElementById('switch-mute-bg').checked = s.mute_on_background !== false;
+          if (document.getElementById('switch-auto-boot'))
+            document.getElementById('switch-auto-boot').checked = s.auto_start_on_boot !== false;
+          if (document.getElementById('switch-cast-enabled'))
+            document.getElementById('switch-cast-enabled').checked = s.cast_enabled !== false;
+        })
+        .catch(function(){});
+    }
+
+    function updateSetting(key, val) {
+      vibrate();
+      if (key === 'buffer_mode') {
+        ['ultra', 'balanced', 'shield'].forEach(function(m) {
+          var el = document.getElementById('buf-' + m);
+          if (el) {
+            if (m === val) el.classList.add('active'); else el.classList.remove('active');
+          }
+        });
+        showToast('Tampon: ' + val.toUpperCase());
+      } else {
+        showToast('Ayar Güncellendi');
+      }
+      fetch('/api/settings_update?key=' + encodeURIComponent(key) + '&val=' + encodeURIComponent(val), { method: 'POST' }).catch(function(){});
     }
   </script>
 </body>

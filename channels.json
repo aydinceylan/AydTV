@@ -28,7 +28,7 @@
     "name": "NOW TV",
     "category": "Ulusal",
     "logo": "https://i.imgur.com/5EYjWK7.png",
-    "url": "https://nowtv.daioncdn.net/nowtv/nowtv.m3u8?ce=3&app=65fa8997-2b2f-4529-85ea-84318628a608&st=yw8ATjX8c13R1gfjhXboYQ&e=1790983453",
+    "url": "https://uycyyuuzyh.turknet.ercdn.net/nphindgytw/nowtv/nowtv.m3u8",
     "backupUrls": [
       "https://nowtv-live-ad.ercdn.net/nowtv/playlist.m3u8?st=yw8ATjX8c13R1gfjhXboYQ&e=1790983453"
     ],
@@ -154,24 +154,6 @@
     "epgId": null
   },
   {
-    "id": "sozcutv",
-    "name": "Sözcü TV",
-    "category": "Haber",
-    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/S%C3%B6zc%C3%BC_TV_logosu.png/800px-S%C3%B6zc%C3%BC_TV_logosu.png",
-    "url": "https://helga.iptv2022.com/szc_tv/index.m3u8",
-    "backupUrls": [],
-    "epgId": "4294"
-  },
-  {
-    "id": "cnnturk",
-    "name": "CNN Türk",
-    "category": "Haber",
-    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/CNN_T%C3%BCrk_logo.svg/800px-CNN_T%C3%BCrk_logo.svg.png",
-    "url": "https://helga.iptv2022.com/cnn_turk/index.m3u8",
-    "backupUrls": [],
-    "epgId": "158"
-  },
-  {
     "id": "ntv",
     "name": "NTV",
     "category": "Haber",
@@ -197,7 +179,7 @@
     "name": "A Haber",
     "category": "Haber",
     "logo": "https://upload.wikimedia.org/wikipedia/commons/7/7c/Ahaber_Logo.png",
-    "url": "https://live.duhnet.tv/S2/HLS_LIVE/ahaber/playlist.m3u8",
+    "url": "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/ahaber/ahaber.m3u8",
     "backupUrls": [
       "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/ahaber/ahaber.m3u8"
     ],
@@ -348,7 +330,7 @@
     "name": "A Spor",
     "category": "Spor",
     "logo": "https://i.imgur.com/ZhkZzLf.png",
-    "url": "https://live.duhnet.tv/S2/HLS_LIVE/aspor/playlist.m3u8",
+    "url": "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/aspor/aspor.m3u8",
     "backupUrls": [
       "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/aspor/aspor.m3u8"
     ],
@@ -379,7 +361,7 @@
     "name": "FB TV",
     "category": "Spor",
     "logo": "https://i.imgur.com/qBVqtYd.png",
-    "url": "http://1hskrdto.rocketcdn.com/fenerbahcetv.smil/playlist.m3u8",
+    "url": "https://1hskrdto.rocketcdn.com/fenerbahcetv.smil/playlist.m3u8",
     "backupUrls": [],
     "epgId": "148"
   },
@@ -415,42 +397,6 @@
       "https://tv-trtbelgesel.medya.trt.com.tr/master_1080.m3u8"
     ],
     "epgId": "21"
-  },
-  {
-    "id": "yesilcam1",
-    "name": "Yeşilçam TV 1",
-    "category": "Sinema & Belgesel",
-    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Ye%C5%9Fil%C3%A7am_TV_logo.png/800px-Ye%C5%9Fil%C3%A7am_TV_logo.png",
-    "url": "https://bstelevision.com/proxy_stream.php?u=http://162.212.179.33:80/gin-trn09/gt-yesilcam-tv1/tracks-v1a1/rewind-8800.m3u8",
-    "backupUrls": [],
-    "epgId": null
-  },
-  {
-    "id": "yesilcam2",
-    "name": "Yeşilçam TV 2",
-    "category": "Sinema & Belgesel",
-    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Ye%C5%9Fil%C3%A7am_TV_logo.png/800px-Ye%C5%9Fil%C3%A7am_TV_logo.png",
-    "url": "https://bstelevision.com/proxy_stream.php?u=http://162.212.179.33:80/gin-trn09/gt-yesilcam-tv2/tracks-v1a1/rewind-8800.m3u8",
-    "backupUrls": [],
-    "epgId": null
-  },
-  {
-    "id": "tarihtv",
-    "name": "Tarih TV",
-    "category": "Sinema & Belgesel",
-    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/15/Tarih_TV_logosu.png/800px-Tarih_TV_logosu.png",
-    "url": "https://bstelevision.com/proxy_stream.php?u=http://65.108.239.207:80/tarihtv/index.m3u8",
-    "backupUrls": [],
-    "epgId": null
-  },
-  {
-    "id": "discovery",
-    "name": "Discovery Channel",
-    "category": "Sinema & Belgesel",
-    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Discovery_Channel_2019.svg/800px-Discovery_Channel_2019.svg.png",
-    "url": "https://bstelevision.com/proxy_stream.php?u=http://65.108.239.207:80/discovery/index.m3u8",
-    "backupUrls": [],
-    "epgId": "8"
   },
   {
     "id": "fx",
@@ -635,5 +581,85 @@
     "url": "https://live.artidijitalmedya.com/artidijital_aksutv/aksutv/playlist.m3u8",
     "backupUrls": [],
     "epgId": null
+  },
+  {
+    "id": "tabii",
+    "name": "Tabii",
+    "category": "Sinema & Belgesel",
+    "url": "https://ceokzokgtd.erbvr.com/tabiitv/tabiitv.m3u8",
+    "backupUrls": [],
+    "logo": "https://cms-tabii-assets.tabii.com/thumbnails/23963_781e9dee-cbd8-491a-b166-0b1df25b3bd0_720.jpeg",
+    "epgId": "tabii",
+    "headers": {}
+  },
+  {
+    "id": "trt2",
+    "name": "TRT 2",
+    "category": "Kültür & Sanat",
+    "url": "https://tv-trt2.medya.trt.com.tr/master_720.m3u8",
+    "backupUrls": [],
+    "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/refs/heads/main/countries/turkey/trt-2-tr.png",
+    "epgId": "trt2",
+    "headers": {}
+  },
+  {
+    "id": "trtmuzik",
+    "name": "TRT Müzik",
+    "category": "Müzik",
+    "url": "https://tv-trtmuzik.medya.trt.com.tr/master.m3u8",
+    "backupUrls": [],
+    "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/refs/heads/main/countries/turkey/trt-muzik-tr.png",
+    "epgId": "trtmuzik",
+    "headers": {}
+  },
+  {
+    "id": "tv4",
+    "name": "TV 4",
+    "category": "Ulusal",
+    "url": "https://turkmedya-live.ercdn.net/tv4/tv4_720p.m3u8",
+    "backupUrls": [],
+    "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/refs/heads/main/countries/turkey/tv4-tr.png",
+    "epgId": "tv4",
+    "headers": {}
+  },
+  {
+    "id": "trtavaz",
+    "name": "TRT Avaz",
+    "category": "Ulusal",
+    "url": "https://tv-trtavaz.medya.trt.com.tr/master.m3u8",
+    "backupUrls": [],
+    "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/refs/heads/main/countries/turkey/trt-avaz-tr.png",
+    "epgId": "trtavaz",
+    "headers": {}
+  },
+  {
+    "id": "trtkurdî",
+    "name": "TRT Kurdî",
+    "category": "Ulusal",
+    "url": "https://tv-trtkurdi.medya.trt.com.tr/master.m3u8",
+    "backupUrls": [],
+    "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/refs/heads/main/countries/turkey/trt-kurdi-tr.png",
+    "epgId": "trtkurdî",
+    "headers": {}
+  },
+  {
+    "id": "trtworld",
+    "name": "TRT World",
+    "category": "Haber",
+    "url": "https://tv-trtworld.medya.trt.com.tr/master.m3u8",
+    "backupUrls": [],
+    "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/refs/heads/main/countries/turkey/trt-world-tr.png",
+    "epgId": "trtworld",
+    "headers": {}
+  },
+  {
+    "id": "dosttv",
+    "name": "Dost TV",
+    "category": "Genel",
+    "url": "https://dost.stream.emsal.im/tv/live.m3u8",
+    "backupUrls": [],
+    "logo": "https://raw.githubusercontent.com/tv-logo/tv-logos/refs/heads/main/countries/turkey/dost-tv-tr.png",
+    "epgId": "dosttv",
+    "headers": {}
   }
 ]

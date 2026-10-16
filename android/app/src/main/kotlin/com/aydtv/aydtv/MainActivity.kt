@@ -102,6 +102,11 @@ class MainActivity : FlutterActivity() {
                     castServerManager?.updateStatus(json)
                     result.success(true)
                 }
+                "updateSettings" -> {
+                    val json = call.argument<String>("json") ?: "{}"
+                    castServerManager?.updateSettings(json)
+                    result.success(true)
+                }
                 else -> {
                     result.notImplemented()
                 }

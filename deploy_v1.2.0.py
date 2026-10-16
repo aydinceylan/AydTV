@@ -10,7 +10,7 @@ import urllib.error
 REPO = "aydinceylan/AydTV"
 TAG = "v1.2.0"
 RELEASE_NAME = "AydTV v1.2.0 - Yeni Çift Panelli Ayarlar, Kanal Sıralama, Web Kumanda & Uyku Zamanlayıcı"
-COMMIT_HASH = "237ecf6"
+COMMIT_HASH = "55e40e2"
 RELEASE_NOTES = """## AydTV v1.2.0 Yenilikleri
 - 🎨 **Baştan Aşağı Yenilenen Çift Panelli Ayarlar Arayüzü:** 55" TV ekranları için özel tasarlanmış, sekmeli, modern cam efektli ve çok ferah yeni ayarlar menüsü.
 - 🔢 **Kumanda ile Kolay Kanal Sıralama:** Ayarlar içerisinden istenilen kanalı OK ile seçip kumandanın Yukarı/Aşağı tuşlarıyla sırasını değiştirme ve kilitli kaydetme özelliği.

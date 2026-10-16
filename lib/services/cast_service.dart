@@ -129,6 +129,13 @@ class CastService {
     } catch (_) {}
   }
 
+  Future<void> updateSettings(Map<String, dynamic> settings) async {
+    try {
+      final json = jsonEncode(settings);
+      await _channel.invokeMethod('updateSettings', {'json': json});
+    } catch (_) {}
+  }
+
   Future<void> disconnect() async {
     try {
       await _channel.invokeMethod('sendRemoteCommand', {'action': 'disconnect'});

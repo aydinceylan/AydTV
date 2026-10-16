@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/channel.dart';
 import '../services/cast_service.dart';
@@ -575,39 +576,89 @@ class _SettingsDialogState extends State<SettingsDialog> {
           const Text('Telefondan Akıllı Kumanda & AirPlay', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 14),
 
-          // Akıllı Kumanda Bilgi Kartı
+          // Akıllı Kumanda Karekod & Bağlantı Kartı
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [TVTheme.focusCyan.withValues(alpha: 0.15), Colors.white.withValues(alpha: 0.04)],
               ),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(18),
               border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.4)),
             ),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
+                // Karekod (QR Kod)
                 Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: TVTheme.focusCyan.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(14)),
-                  child: const Icon(Icons.qr_code_2_rounded, color: TVTheme.focusCyan, size: 36),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: TVTheme.focusCyan.withValues(alpha: 0.35),
+                        blurRadius: 18,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: QrImageView(
+                    data: remoteUrl,
+                    version: QrVersions.auto,
+                    size: 140,
+                    backgroundColor: Colors.white,
+                    padding: const EdgeInsets.all(2),
+                  ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 20),
+
+                // Açıklama ve Adres
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Telefondan Kumanda Et (Sıfır Uygulama)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: TVTheme.focusCyan.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text('SIFIR KURULUM', style: TextStyle(color: TVTheme.focusCyan, fontSize: 11, fontWeight: FontWeight.bold)),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text('Mobil Web Kumanda', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
                       Text(
-                        'Aynı Wi-Fi ağındaki herhangi bir iPhone veya Android cihazın tarayıcısından bu adrese girin:',
-                        style: TextStyle(color: TVTheme.textSecondary.withValues(alpha: 0.9), fontSize: 12),
+                        '1. Telefonunuzun kamerasını açın ve soldaki karekodu okutun.\n2. Veya telefon tarayıcınızdan aşağıdaki adresi açın:',
+                        style: TextStyle(color: TVTheme.textSecondary.withValues(alpha: 0.95), fontSize: 13, height: 1.4),
+                      ),
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.6),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.5)),
+                        ),
+                        child: Text(
+                          remoteUrl,
+                          style: const TextStyle(
+                            color: TVTheme.focusCyan,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(6)),
-                        child: Text(remoteUrl, style: const TextStyle(color: TVTheme.focusCyan, fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 0.5)),
+                      const Text(
+                        'iPhone, iPad ve tüm Android cihazların tarayıcılarında anında çalışır.',
+                        style: TextStyle(color: Colors.white38, fontSize: 11),
                       ),
                     ],
                   ),
@@ -615,7 +666,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
               ],
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
 
           _buildSwitchRow(
             icon: Icons.airplay_rounded,
