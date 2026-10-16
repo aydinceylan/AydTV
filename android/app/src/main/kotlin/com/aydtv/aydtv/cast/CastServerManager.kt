@@ -458,7 +458,8 @@ class CastServerManager(
                         }
                         if (headerSkip < 124) break
 
-                        val payloadType = (hBuf[0].toInt() and 0xFF) or ((hBuf[1].toInt() and 0xFF) shl 8)
+                        // RPiPlay & UxPlay standardı: payload_type = packet[4] & 0xFF
+                        val payloadType = hBuf[0].toInt() and 0xFF
                         val payloadOption = (hBuf[2].toInt() and 0xFF) or ((hBuf[3].toInt() and 0xFF) shl 8)
 
                         // Payload verisini oku
@@ -638,6 +639,17 @@ class CastServerManager(
                 hidePin()
                 notifyDeviceConnected(clientName, "airplay")
                 notifyMediaStarted("screen", "", "Ekran Yansıtma", clientName, deviceName)
+
+                // AirPlay AES-CTR deşifreleme motorunu el sıkışma anahtarlarıyla başlat
+                try {
+                    val streamId = path.substringAfterLast("/").toLongOrNull() ?: 1L
+                    val aesKey = CastCryptoHelper.lastAesKey
+                    val ecdhSecret = CastCryptoHelper.lastEcdhSecret ?: ByteArray(32)
+                    if (aesKey != null) {
+                        AirPlayMirrorDecoder.initAes(aesKey, ecdhSecret, streamId)
+                    }
+                } catch (_: Exception) {}
+
                 val transport = headers["transport"] ?: "RTP/AVP/TCP;unicast;interleaved=0-1;mode=record"
                 val setupXml = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1099,6 +1111,28 @@ class CastServerManager(
                         }
                     } catch (e: Exception) {
                         android.util.Log.e("CastServer", "Web photo error: ${e.message}")
+                    }
+                    sendHttpResponse(output, 400, "Bad Request", "application/json", "{\"status\":\"error\"}")
+                }
+                path.startsWith("/api/cast_screen_frame") -> {
+                    try {
+                        val jsonObj = org.json.JSONObject(bodyStr)
+                        var base64Data = jsonObj.optString("frame", "")
+                        if (base64Data.contains(",")) {
+                            base64Data = base64Data.substringAfter(",")
+                        }
+                        if (base64Data.isNotBlank()) {
+                            val imgBytes = Base64.decode(base64Data, Base64.DEFAULT)
+                            val frameFile = File(context.cacheDir, "live_screen_frame.jpg")
+                            frameFile.writeBytes(imgBytes)
+                            isDisplayingPhoto = true
+                            notifyDeviceConnected("Telefon", "web_remote")
+                            notifyMediaStarted("photo", frameFile.absolutePath, "📱 Canlı Telefon Ekranı", "Telefon", deviceName)
+                            sendHttpResponse(output, 200, "OK", "application/json", "{\"status\":\"ok\"}")
+                            return
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("CastServer", "Web screen frame error: ${e.message}")
                     }
                     sendHttpResponse(output, 400, "Bad Request", "application/json", "{\"status\":\"error\"}")
                 }
@@ -1705,6 +1739,19 @@ class CastServerManager(
 
     <!-- SEKME 3: MEDYA & FOTOĞRAF PAYLAŞ -->
     <div id="tab-media" class="tab-content">
+      <!-- Canlı Ekran Yansıtma Kartı (1 Tıkla) -->
+      <div class="settings-card" style="border: 1.5px solid rgba(0,229,255,0.4); background: rgba(0,229,255,0.04);">
+        <div class="card-head" style="color: #00E5FF;">
+          <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+          📲 Telefon Ekranını Canlı Yansıt
+        </div>
+        <div class="card-desc">Telefonunuzun ekranını canlı olarak televizyona aktarın. AirPlay şifreleme/DRM sorunu olmadan anında çalışır.</div>
+        <div id="btnScreenShare" class="sys-btn" style="width:100%; height:52px; background:rgba(0,229,255,0.15); border-color:#00E5FF; color:#00E5FF; font-size:15px; font-weight:700;" onclick="toggleScreenShare()">
+          <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          Canlı Ekran Paylaşımını Başlat
+        </div>
+      </div>
+
       <!-- Fotoğraf Yansıtma Kartı -->
       <div class="settings-card">
         <div class="card-head">
@@ -2237,6 +2284,90 @@ class CastServerManager(
       }).catch(function() {
         showToast('Bağlantı hatası');
       });
+    }
+
+    // --- CANLI EKRAN YANSITMA (BROWSER SCREEN SHARING) ---
+    var screenStream = null;
+    var screenInterval = null;
+    var isScreenSharing = false;
+
+    async function toggleScreenShare() {
+      var btn = document.getElementById('btnScreenShare');
+      if (isScreenSharing) {
+        stopScreenShare();
+        return;
+      }
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+          showToast('Tarayıcınız ekran paylaşımını desteklemiyor');
+          return;
+        }
+        showToast('Ekran paylaşımı izni bekleniyor...');
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { cursor: "always", displaySurface: "monitor" },
+          audio: false
+        });
+        isScreenSharing = true;
+        if (btn) {
+          btn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"></rect></svg> Ekran Paylaşımını Durdur';
+          btn.style.background = 'rgba(255, 59, 48, 0.2)';
+          btn.style.borderColor = '#FF3B30';
+          btn.style.color = '#FF3B30';
+        }
+        var video = document.createElement('video');
+        video.srcObject = screenStream;
+        video.play();
+        var canvas = document.createElement('canvas');
+        var ctx = canvas.getContext('2d');
+
+        screenStream.getVideoTracks()[0].onended = function() {
+          stopScreenShare();
+        };
+
+        var sendingFrame = false;
+        screenInterval = setInterval(function() {
+          if (!isScreenSharing || video.readyState < 2 || sendingFrame) return;
+          var maxDim = 1280;
+          var w = video.videoWidth || 720;
+          var h = video.videoHeight || 1280;
+          var scale = Math.min(1.0, maxDim / Math.max(w, h));
+          canvas.width = Math.round(w * scale);
+          canvas.height = Math.round(h * scale);
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          var jpeg = canvas.toDataURL('image/jpeg', 0.65);
+          sendingFrame = true;
+          fetch('/api/cast_screen_frame', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ frame: jpeg })
+          }).then(function(){ sendingFrame = false; }).catch(function(){ sendingFrame = false; });
+        }, 200);
+
+        showToast('Canlı Ekran TV\'ye Yansıtılıyor');
+      } catch (err) {
+        showToast('Ekran paylaşımı başlatılamadı');
+        stopScreenShare();
+      }
+    }
+
+    function stopScreenShare() {
+      isScreenSharing = false;
+      if (screenInterval) {
+        clearInterval(screenInterval);
+        screenInterval = null;
+      }
+      if (screenStream) {
+        screenStream.getTracks().forEach(function(t) { t.stop(); });
+        screenStream = null;
+      }
+      var btn = document.getElementById('btnScreenShare');
+      if (btn) {
+        btn.innerHTML = '<svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Canlı Ekran Paylaşımını Başlat';
+        btn.style.background = 'rgba(0, 229, 255, 0.15)';
+        btn.style.borderColor = '#00E5FF';
+        btn.style.color = '#00E5FF';
+      }
+      closeTvMedia();
     }
 
     function closeTvMedia() {

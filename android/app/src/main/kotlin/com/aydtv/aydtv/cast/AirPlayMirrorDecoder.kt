@@ -1,5 +1,6 @@
 package com.aydtv.aydtv.cast
 
+import android.graphics.SurfaceTexture
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -9,19 +10,26 @@ import android.os.Looper
 import android.util.Log
 import android.view.Surface
 import java.nio.ByteBuffer
+import java.security.MessageDigest
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * AirPlay Screen Mirroring (Type 110 stream) için donanımsal H.264 çözücü.
- * iPhone/Mac tarafından gönderilen H.264 AVCC karelerini Annex-B NAL formatına dönüştürüp
- * Android MediaCodec donanımı ile çözerek doğrudan Flutter Surface'ine (60 FPS) basar.
+ * iPhone/Mac tarafından gönderilen H.264 AVCC karelerini AES-CTR ile deşifre edip
+ * Annex-B NAL formatına dönüştürerek Android MediaCodec donanımı ile çözer ve
+ * doğrudan Flutter Surface'ine (60 FPS) basar.
  */
 object AirPlayMirrorDecoder {
     private const val TAG = "AirPlayMirror"
 
     private var targetSurface: Surface? = null
+    private var targetSurfaceTexture: SurfaceTexture? = null
     private var flutterTextureId: Long = -1L
 
     private var mediaCodec: MediaCodec? = null
+    @Volatile
     private var isCodecRunning = false
 
     var currentWidth: Int = 1920
@@ -33,17 +41,64 @@ object AirPlayMirrorDecoder {
     private var hasFeedKeyframe = false
     private var frameCount = 0L
 
+    // AES-CTR Mirror Deşifreleme
+    private var aesCipher: Cipher? = null
+    private var nextDecryptCount: Int = 0
+    private val ogBuffer = ByteArray(16)
+
     private val mainHandler = Handler(Looper.getMainLooper())
     var onMirrorStateListener: ((isStarted: Boolean, textureId: Long, width: Int, height: Int) -> Unit)? = null
 
     /**
      * FlutterEngine'in SurfaceTexture'ından üretilen Surface nesnesini bağlar.
      */
-    fun attachSurface(surface: Surface, textureId: Long) {
+    fun attachSurface(surface: Surface, textureId: Long, surfaceTexture: SurfaceTexture? = null) {
         synchronized(this) {
             targetSurface = surface
+            targetSurfaceTexture = surfaceTexture
             flutterTextureId = textureId
             Log.i(TAG, "Attached Flutter Surface with textureId: $textureId")
+        }
+    }
+
+    /**
+     * AirPlay AES-CTR deşifreleme oturumunu ilklendirir (RPiPlay standardı).
+     */
+    fun initAes(aesKey: ByteArray, ecdhSecret: ByteArray, streamConnectionId: Long = 1L) {
+        synchronized(this) {
+            try {
+                val md = MessageDigest.getInstance("SHA-512")
+                val eaesKey = ByteArray(64)
+                md.update(aesKey)
+                md.update(ecdhSecret)
+                val eaesDigest = md.digest()
+                System.arraycopy(eaesDigest, 0, eaesKey, 0, minOf(64, eaesDigest.size))
+
+                val skeyall = "AirPlayStreamKey$streamConnectionId".toByteArray(Charsets.UTF_8)
+                val sivall = "AirPlayStreamIV$streamConnectionId".toByteArray(Charsets.UTF_8)
+
+                md.reset()
+                md.update(skeyall)
+                md.update(eaesKey, 0, 16)
+                val hash1 = md.digest()
+
+                md.reset()
+                md.update(sivall)
+                md.update(eaesKey, 0, 16)
+                val hash2 = md.digest()
+
+                val decryptKey = hash1.copyOfRange(0, 16)
+                val decryptIv = hash2.copyOfRange(0, 16)
+
+                val cipher = Cipher.getInstance("AES/CTR/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(decryptKey, "AES"), IvParameterSpec(decryptIv))
+                aesCipher = cipher
+                nextDecryptCount = 0
+                Log.i(TAG, "AirPlay AES-CTR deşifreleme motoru başarıyla ilklendirildi (streamId=$streamConnectionId).")
+            } catch (e: Exception) {
+                Log.w(TAG, "initAes hatası: ${e.message}")
+                aesCipher = null
+            }
         }
     }
 
@@ -53,7 +108,8 @@ object AirPlayMirrorDecoder {
     fun feedPacket(type: Int, option: Int, hBuf: ByteArray, payload: ByteArray) {
         synchronized(this) {
             try {
-                when (type) {
+                val pType = type and 0xFF
+                when (pType) {
                     1 -> {
                         // SPS / PPS Codec Ayar Paketi (Şifresiz)
                         val w = parseDimension(hBuf, 52, 12, 1920)
@@ -63,9 +119,13 @@ object AirPlayMirrorDecoder {
                         currentWidth = w
                         currentHeight = h
 
-                        // AVCC uzunluklarını 00 00 00 01 Annex-B'ye çevir
-                        val annexBSpsPps = convertAvccToAnnexB(payload)
-                        cachedSpsPps = annexBSpsPps
+                        // AVCC formatından SPS ve PPS NALU'larını çıkar
+                        val extracted = parseAvccConfig(payload)
+                        if (extracted != null) {
+                            cachedSpsPps = extracted
+                        } else {
+                            cachedSpsPps = convertAvccToAnnexB(payload)
+                        }
 
                         // Codec'i başlat veya yeniden boyutlandır
                         startCodecIfNeeded(w, h)
@@ -79,15 +139,18 @@ object AirPlayMirrorDecoder {
                         // Video Frame Paketi (H.264 slice)
                         if (payload.isEmpty()) return
 
-                        // Codec hazır değilse SPS/PPS ile başlatmayı dene
+                        // Codec hazır değilse başlatmayı dene
                         if (!isCodecRunning || mediaCodec == null) {
                             startCodecIfNeeded(currentWidth, currentHeight)
                         }
 
                         val c = mediaCodec ?: return
 
+                        // AES-CTR deşifreleme uygula (gerekliyse)
+                        val decryptedPayload = decryptPacketIfNeeded(payload)
+
                         // AVCC to Annex-B dönüşümü
-                        val frameAnnexB = convertAvccToAnnexB(payload)
+                        val frameAnnexB = convertAvccToAnnexB(decryptedPayload)
 
                         // İlk karede veya SPS/PPS henüz beslenmediyse, SPS/PPS'i IDR karesinin önüne ekle
                         val finalFrame = if (!hasFeedKeyframe && cachedSpsPps != null) {
@@ -111,41 +174,114 @@ object AirPlayMirrorDecoder {
                         // Heartbeat / Keep-alive
                     }
                     else -> {
-                        Log.d(TAG, "Unknown mirror packet type: $type, size: ${payload.size}")
+                        Log.d(TAG, "Unknown mirror packet type: $type (pType=$pType), size: ${payload.size}")
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error in feedPacket: ${e.message}", e)
+                Log.e(TAG, "Error in feedPacket: ${e.message}")
             }
         }
     }
 
-    private fun feedToCodec(codec: MediaCodec, data: ByteArray) {
-        val inIdx = codec.dequeueInputBuffer(10_000)
-        if (inIdx >= 0) {
-            val inBuf = codec.getInputBuffer(inIdx) ?: return
-            inBuf.clear()
-            inBuf.put(data)
-            val ptsUs = System.nanoTime() / 1000
-            codec.queueInputBuffer(inIdx, 0, data.size, ptsUs, 0)
-            frameCount++
-            if (frameCount % 120 == 0L) {
-                Log.i(TAG, "Decoded $frameCount frames successfully onto Flutter Surface.")
+    private fun decryptPacketIfNeeded(payload: ByteArray): ByteArray {
+        val cipher = aesCipher ?: return payload
+        return try {
+            val decrypted = ByteArray(payload.size)
+            // Blok hizalı AES-CTR çözme
+            val blocksToDecrypt = (payload.size / 16) * 16
+            if (blocksToDecrypt > 0) {
+                val blockDecrypted = cipher.update(payload, 0, blocksToDecrypt)
+                if (blockDecrypted != null) {
+                    System.arraycopy(blockDecrypted, 0, decrypted, 0, blockDecrypted.size)
+                }
             }
+            // Kalan baytları kopyala
+            val rem = payload.size - blocksToDecrypt
+            if (rem > 0) {
+                System.arraycopy(payload, blocksToDecrypt, decrypted, blocksToDecrypt, rem)
+            }
+            decrypted
+        } catch (_: Exception) {
+            payload
+        }
+    }
+
+    private fun parseAvccConfig(payload: ByteArray): ByteArray? {
+        if (payload.size < 8) return null
+        return try {
+            val spsSize = ((payload[6].toInt() and 0xFF) shl 8) or (payload[7].toInt() and 0xFF)
+            if (spsSize <= 0 || payload.size < 8 + spsSize) return null
+
+            val spsNal = ByteArray(4 + spsSize)
+            spsNal[0] = 0; spsNal[1] = 0; spsNal[2] = 0; spsNal[3] = 1
+            System.arraycopy(payload, 8, spsNal, 4, spsSize)
+
+            val ppsOffset = 8 + spsSize
+            var ppsNal: ByteArray? = null
+            if (payload.size > ppsOffset + 2) {
+                val ppsSize = ((payload[ppsOffset + 1].toInt() and 0xFF) shl 8) or (payload[ppsOffset + 2].toInt() and 0xFF)
+                if (ppsSize in 1..(payload.size - (ppsOffset + 3))) {
+                    ppsNal = ByteArray(4 + ppsSize)
+                    ppsNal[0] = 0; ppsNal[1] = 0; ppsNal[2] = 0; ppsNal[3] = 1
+                    System.arraycopy(payload, ppsOffset + 3, ppsNal, 4, ppsSize)
+                }
+            }
+
+            if (ppsNal != null) {
+                val combined = ByteArray(spsNal.size + ppsNal.size)
+                System.arraycopy(spsNal, 0, combined, 0, spsNal.size)
+                System.arraycopy(ppsNal, 0, combined, spsNal.size, ppsNal.size)
+                Log.i(TAG, "Parsed AVCC Config successfully: SPS size=$spsSize, PPS size=${ppsNal.size - 4}")
+                combined
+            } else {
+                spsNal
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse AVCC Config: ${e.message}")
+            null
+        }
+    }
+
+    private fun feedToCodec(codec: MediaCodec, data: ByteArray) {
+        try {
+            val inIdx = codec.dequeueInputBuffer(10_000)
+            if (inIdx >= 0) {
+                val inBuf = codec.getInputBuffer(inIdx) ?: return
+                inBuf.clear()
+                inBuf.put(data)
+                val ptsUs = System.nanoTime() / 1000
+                codec.queueInputBuffer(inIdx, 0, data.size, ptsUs, 0)
+                frameCount++
+                if (frameCount % 120 == 0L) {
+                    Log.i(TAG, "Decoded $frameCount frames successfully onto Flutter Surface.")
+                }
+            }
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "MediaCodec feed error: ${e.message}, resetting codec...")
+            stopCodecInternal()
+        } catch (e: Exception) {
+            Log.w(TAG, "feedToCodec exception: ${e.message}")
         }
     }
 
     private fun drainOutput(codec: MediaCodec) {
         val info = MediaCodec.BufferInfo()
         while (true) {
-            val outIdx = codec.dequeueOutputBuffer(info, 0)
-            if (outIdx >= 0) {
-                // true: Surface'e çiz ve tamponu serbest bırak
-                codec.releaseOutputBuffer(outIdx, true)
-            } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                val newFormat = codec.outputFormat
-                Log.i(TAG, "MediaCodec output format changed: $newFormat")
-            } else {
+            try {
+                val outIdx = codec.dequeueOutputBuffer(info, 0)
+                if (outIdx >= 0) {
+                    codec.releaseOutputBuffer(outIdx, true)
+                } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    val newFormat = codec.outputFormat
+                    Log.i(TAG, "MediaCodec output format changed: $newFormat")
+                } else {
+                    break
+                }
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "MediaCodec drain error: ${e.message}")
+                stopCodecInternal()
+                break
+            } catch (e: Exception) {
                 break
             }
         }
@@ -164,11 +300,19 @@ object AirPlayMirrorDecoder {
         try {
             stopCodecInternal()
 
+            // MediaTek / MStar TV çipi için 16'nın katına hizalama (Donanımsal çökme önleyici)
+            val alignedWidth = ((width + 15) / 16) * 16
+            val alignedHeight = ((height + 15) / 16) * 16
+
+            try {
+                targetSurfaceTexture?.setDefaultBufferSize(alignedWidth, alignedHeight)
+            } catch (_: Exception) {}
+
             val mime = "video/avc"
-            val format = MediaFormat.createVideoFormat(mime, width, height).apply {
+            val format = MediaFormat.createVideoFormat(mime, alignedWidth, alignedHeight).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_FRAME_RATE, 60)
-                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, maxOf(width * height * 3 / 4, 1024 * 1024))
+                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, maxOf(alignedWidth * alignedHeight * 3 / 4, 1024 * 1024))
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
                 }
@@ -192,9 +336,9 @@ object AirPlayMirrorDecoder {
             hasFeedKeyframe = false
             frameCount = 0L
 
-            Log.i(TAG, "MediaCodec hardware decoder started successfully: ${width}x${height} @ 60 FPS")
+            Log.i(TAG, "MediaCodec hardware decoder started successfully: ${alignedWidth}x${alignedHeight} @ 60 FPS")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start MediaCodec: ${e.message}", e)
+            Log.e(TAG, "Failed to start MediaCodec: ${e.message}")
             stopCodecInternal()
         }
     }
@@ -205,6 +349,7 @@ object AirPlayMirrorDecoder {
             cachedSpsPps = null
             hasFeedKeyframe = false
             frameCount = 0L
+            aesCipher = null
 
             mainHandler.post {
                 onMirrorStateListener?.invoke(false, flutterTextureId, 0, 0)

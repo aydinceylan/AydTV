@@ -90,6 +90,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   int? _mirrorTextureId;
   double _mirrorWidth = 1920.0;
   double _mirrorHeight = 1080.0;
+  int _castFrameVersion = 0;
 
   Future<void> _loadBufferSetting() async {
     final prefs = await SharedPreferences.getInstance();
@@ -170,10 +171,16 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     _castService.onMediaStarted = (media) {
       if (!mounted) return;
       _stuckCounter = 0;
+      if (media.mediaType == 'photo' && media.url.isNotEmpty) {
+        try {
+          FileImage(File(media.url)).evict();
+        } catch (_) {}
+      }
       setState(() {
         _isCasting = true;
         _isCastPlaying = true;
         _currentCastMedia = media;
+        _castFrameVersion++;
       });
       // Canlı TV yayınını duraklat ve sesini tamamen kes
       _controller?.setVolume(0.0);
@@ -1627,9 +1634,10 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
             Center(
               child: Image.file(
                 File(_currentCastMedia!.url),
-                key: ValueKey('${_currentCastMedia!.url}_${_currentCastMedia!.title}'),
+                key: ValueKey('${_currentCastMedia!.url}_$_castFrameVersion'),
                 fit: BoxFit.contain,
-                filterQuality: FilterQuality.high,
+                filterQuality: FilterQuality.medium,
+                gaplessPlayback: true,
                 errorBuilder: (context, error, stackTrace) => Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [

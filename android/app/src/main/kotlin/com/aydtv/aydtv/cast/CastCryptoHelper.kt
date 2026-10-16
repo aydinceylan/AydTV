@@ -35,6 +35,14 @@ object CastCryptoHelper {
     val serverEd25519PublicKey: Ed25519PublicKeyParameters = serverEd25519PrivateKey.generatePublicKey()
     val serverEd25519PubBytes: ByteArray = serverEd25519PublicKey.encoded
 
+    // Canlı ekran (Type 110 H.264 stream) AES-CTR deşifreleme için ortak anahtarlar
+    @Volatile
+    var lastSharedSecret: ByteArray? = null
+    @Volatile
+    var lastAesKey: ByteArray? = null
+    @Volatile
+    var lastEcdhSecret: ByteArray? = null
+
     /**
      * mDNS TXT kaydında kullanılan 32-baytlık public key hex string
      */
@@ -114,6 +122,11 @@ object CastCryptoHelper {
             val verifyResp = ByteArray(96)
             System.arraycopy(serverEcdhPubBytes, 0, verifyResp, 0, 32)
             System.arraycopy(encryptedSignature, 0, verifyResp, 32, 64)
+
+            // Canlı ekran (Type 110 stream) için anahtarları kaydet
+            lastSharedSecret = sharedSecret
+            lastAesKey = aesKey
+            lastEcdhSecret = clientEcdhPubBytes
 
             Log.i(TAG, "Pair-Verify Step 1 kriptografik el sıkışma başarıyla tamamlandı (96 bayt).")
             return verifyResp

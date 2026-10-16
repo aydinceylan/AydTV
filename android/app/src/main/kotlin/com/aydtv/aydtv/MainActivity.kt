@@ -81,7 +81,7 @@ class MainActivity : FlutterActivity() {
             mirrorTextureEntry = entry
             val surface = Surface(entry.surfaceTexture())
             mirrorSurface = surface
-            com.aydtv.aydtv.cast.AirPlayMirrorDecoder.attachSurface(surface, entry.id())
+            com.aydtv.aydtv.cast.AirPlayMirrorDecoder.attachSurface(surface, entry.id(), entry.surfaceTexture())
             com.aydtv.aydtv.cast.AirPlayMirrorDecoder.onMirrorStateListener = { isStarted, textureId, width, height ->
                 if (isStarted) {
                     castChannel.invokeMethod("onMirrorStarted", mapOf(
