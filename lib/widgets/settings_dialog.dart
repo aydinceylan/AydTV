@@ -502,18 +502,22 @@ class _SettingsDialogState extends State<SettingsDialog> {
                 final isMoving = _movingChannelIndex == index;
 
                 return Focus(
+                  key: ValueKey(ch.id),
                   onKeyEvent: (node, event) {
-                    if (event.runtimeType.toString().contains('KeyDownEvent')) {
-                      final key = event.logicalKey.debugName ?? '';
-                      if (key.contains('Enter') || key.contains('Select')) {
+                    if (event is KeyDownEvent) {
+                      final key = event.logicalKey;
+                      if (key == LogicalKeyboardKey.select ||
+                          key == LogicalKeyboardKey.enter ||
+                          key == LogicalKeyboardKey.space ||
+                          key == LogicalKeyboardKey.gameButtonA) {
                         setState(() {
                           _movingChannelIndex = isMoving ? null : index;
                         });
                         return KeyEventResult.handled;
-                      } else if (isMoving && key.contains('Arrow Up')) {
+                      } else if (isMoving && (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.channelUp)) {
                         _moveChannel(index, index - 1);
                         return KeyEventResult.handled;
-                      } else if (isMoving && key.contains('Arrow Down')) {
+                      } else if (isMoving && (key == LogicalKeyboardKey.arrowDown || key == LogicalKeyboardKey.channelDown)) {
                         _moveChannel(index, index + 1);
                         return KeyEventResult.handled;
                       }
@@ -523,51 +527,112 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   child: Builder(
                     builder: (context) {
                       final isFocused = Focus.of(context).hasFocus;
-                      return Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: isMoving
-                              ? Colors.greenAccent.withValues(alpha: 0.25)
-                              : (isFocused ? TVTheme.focusCyan.withValues(alpha: 0.2) : Colors.transparent),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: isMoving ? Colors.greenAccent : (isFocused ? TVTheme.focusCyan : Colors.transparent),
-                            width: 1.5,
+                      return InkWell(
+                        onTap: () {
+                          setState(() {
+                            _movingChannelIndex = isMoving ? null : index;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: isMoving
+                                ? Colors.greenAccent.withValues(alpha: 0.28)
+                                : (isFocused ? TVTheme.focusCyan.withValues(alpha: 0.22) : Colors.transparent),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isMoving
+                                  ? Colors.greenAccent
+                                  : (isFocused ? TVTheme.focusCyan : Colors.white10),
+                              width: (isMoving || isFocused) ? 2.0 : 1.0,
+                            ),
                           ),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: isMoving ? Colors.greenAccent : TVTheme.focusCyan.withValues(alpha: 0.2),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  '${index + 1}',
-                                  style: TextStyle(
-                                    color: isMoving ? Colors.black : Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  color: isMoving ? Colors.greenAccent : TVTheme.focusCyan.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    '${index + 1}',
+                                    style: TextStyle(
+                                      color: isMoving ? Colors.black : Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Text(
-                                ch.name,
-                                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Text(
+                                  ch.name,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: (isMoving || isFocused) ? FontWeight.bold : FontWeight.w600,
+                                  ),
+                                ),
                               ),
-                            ),
-                            if (isMoving)
-                              const Text('Taşınıyor (▲ ▼)', style: TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.bold))
-                            else
-                              const Text('Seç (OK)', style: TextStyle(color: Colors.white38, fontSize: 12)),
-                          ],
+                              if (isMoving) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.greenAccent.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text(
+                                    '▲ ▼ Tuşlarıyla Taşıyın',
+                                    style: TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_upward_rounded, color: Colors.greenAccent, size: 22),
+                                  tooltip: 'Yukarı Taşı',
+                                  onPressed: () => _moveChannel(index, index - 1),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_downward_rounded, color: Colors.greenAccent, size: 22),
+                                  tooltip: 'Aşağı Taşı',
+                                  onPressed: () => _moveChannel(index, index + 1),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.greenAccent,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text(
+                                    'Kilitle (OK)',
+                                    style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                              ] else
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: isFocused ? TVTheme.focusCyan : Colors.white10,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Taşı (OK)',
+                                    style: TextStyle(
+                                      color: isFocused ? Colors.black : Colors.white60,
+                                      fontSize: 12,
+                                      fontWeight: isFocused ? FontWeight.bold : FontWeight.normal,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
                       );
                     },

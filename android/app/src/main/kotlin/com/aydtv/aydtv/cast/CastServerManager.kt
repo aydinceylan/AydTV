@@ -33,6 +33,7 @@ class CastServerManager(
     private var isRunning = false
     private var deviceName = "AydTV"
     private var pinEnabled = false
+    private var activePinCode: String? = null
     private var activeClientSocket: Socket? = null
     private val activeConnections = java.util.concurrent.atomic.AtomicInteger(0)
     private var disconnectRunnable: Runnable? = null
@@ -465,6 +466,10 @@ class CastServerManager(
                 disconnectRunnable?.let { mainHandler.removeCallbacks(it) }
                 disconnectRunnable = Runnable {
                     if (activeConnections.get() <= 0) {
+                        if (activePinCode != null) {
+                            notifyHidePinCode()
+                            activePinCode = null
+                        }
                         notifyDeviceDisconnected()
                     }
                 }
@@ -501,7 +506,19 @@ class CastServerManager(
                 val plist = getAirplayPlistXml().toByteArray(Charsets.UTF_8)
                 sendRtspResponse(output, 200, "OK", cseq, "text/x-apple-plist+xml", plist)
             }
+            method in listOf("POST", "GET") && path.startsWith("/pair-pin-start") -> {
+                val pin = String.format("%04d", (1000..9999).random())
+                activePinCode = pin
+                notifyShowPinCode(pin, clientName)
+                sendRtspResponse(output, 200, "OK", cseq)
+            }
             method == "POST" && path.startsWith("/pair-setup") -> {
+                if (pinEnabled) {
+                    if (activePinCode == null) {
+                        activePinCode = String.format("%04d", (1000..9999).random())
+                    }
+                    notifyShowPinCode(activePinCode!!, clientName)
+                }
                 val serverPk = ByteArray(32) { ((it * 17 + 23) % 256).toByte() }
                 sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", serverPk)
             }
@@ -513,6 +530,10 @@ class CastServerManager(
                     for (i in 32 until 96) verifyResp[i] = ((i * 31 + 41) % 256).toByte()
                     sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", verifyResp)
                 } else {
+                    if (activePinCode != null) {
+                        notifyHidePinCode()
+                        activePinCode = null
+                    }
                     sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", ByteArray(0))
                 }
             }
@@ -534,6 +555,10 @@ class CastServerManager(
                 }
             }
             method == "SETUP" -> {
+                if (activePinCode != null) {
+                    notifyHidePinCode()
+                    activePinCode = null
+                }
                 notifyMediaStarted("screen", "", "Ekran Yansıtma", clientName, deviceName)
                 val transport = headers["transport"] ?: "RTP/AVP/TCP;unicast;interleaved=0-1;mode=record"
                 sendRtspResponse(
@@ -546,6 +571,10 @@ class CastServerManager(
                 )
             }
             method == "RECORD" -> {
+                if (activePinCode != null) {
+                    notifyHidePinCode()
+                    activePinCode = null
+                }
                 sendRtspResponse(
                     output, 200, "OK", cseq,
                     extraHeaders = mapOf(
@@ -558,6 +587,10 @@ class CastServerManager(
                 sendRtspResponse(output, 200, "OK", cseq)
             }
             method == "TEARDOWN" -> {
+                if (activePinCode != null) {
+                    notifyHidePinCode()
+                    activePinCode = null
+                }
                 sendRtspResponse(output, 200, "OK", cseq)
                 notifyMediaStopped()
                 notifyDeviceDisconnected()
@@ -584,7 +617,19 @@ class CastServerManager(
                 val xmlInfo = getAirplayPlistXml()
                 sendHttpResponse(output, 200, "OK", "text/x-apple-plist+xml", xmlInfo, cseq)
             }
+            path.startsWith("/pair-pin-start") -> {
+                val pin = String.format("%04d", (1000..9999).random())
+                activePinCode = pin
+                notifyShowPinCode(pin, clientName)
+                sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
+            }
             path.startsWith("/pair-setup") -> {
+                if (pinEnabled) {
+                    if (activePinCode == null) {
+                        activePinCode = String.format("%04d", (1000..9999).random())
+                    }
+                    notifyShowPinCode(activePinCode!!, clientName)
+                }
                 val serverPk = ByteArray(32) { ((it * 17 + 23) % 256).toByte() }
                 sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", serverPk, cseq)
             }
@@ -596,6 +641,10 @@ class CastServerManager(
                     for (i in 32 until 96) verifyResp[i] = ((i * 31 + 41) % 256).toByte()
                     sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", verifyResp, cseq)
                 } else {
+                    if (activePinCode != null) {
+                        notifyHidePinCode()
+                        activePinCode = null
+                    }
                     sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", ByteArray(0), cseq)
                 }
             }
@@ -617,6 +666,10 @@ class CastServerManager(
                 }
             }
             path.startsWith("/play") -> {
+                if (activePinCode != null) {
+                    notifyHidePinCode()
+                    activePinCode = null
+                }
                 var streamUrl = headers["content-location"] ?: ""
                 if (streamUrl.isBlank()) {
                     if (bodyStr.contains("<key>Content-Location</key>")) {
@@ -884,6 +937,27 @@ class CastServerManager(
                     }
                     sendHttpResponse(output, 200, "OK", "application/json", "{\"status\":\"ok\"}")
                 }
+                path.startsWith("/api/reorder_channels") -> {
+                    val ids = mutableListOf<String>()
+                    try {
+                        val jsonArray = org.json.JSONArray(bodyStr)
+                        for (i in 0 until jsonArray.length()) {
+                            ids.add(jsonArray.getString(i))
+                        }
+                    } catch (_: Exception) {
+                        val rawIds = Regex("ids=([^&]+)").find(path)?.groupValues?.get(1) ?: ""
+                        if (rawIds.isNotEmpty()) {
+                            val decoded = try { URLDecoder.decode(rawIds, "UTF-8") } catch (_: Exception) { rawIds }
+                            ids.addAll(decoded.split(",").filter { it.isNotBlank() })
+                        }
+                    }
+                    if (ids.isNotEmpty()) {
+                        mainHandler.post {
+                            channel.invokeMethod("onRemoteCommand", mapOf("action" to "reorder_channels", "value" to ids))
+                        }
+                    }
+                    sendHttpResponse(output, 200, "OK", "application/json", "{\"status\":\"ok\"}")
+                }
                 else -> {
                     val html = getWebRemoteHtml()
                     sendHttpResponse(output, 200, "OK", "text/html; charset=utf-8", html)
@@ -1101,8 +1175,25 @@ class CastServerManager(
       color: #E2E8F0; font-size: 13px; font-weight: 600; text-align: center; cursor: pointer; transition: all 0.12s;
     }
     .timer-btn:active { background: #00E5FF; color: #050B14; }
+    .timer-btn.active { background: #00E5FF; color: #050B14; font-weight: 700; box-shadow: 0 2px 10px rgba(0,229,255,0.35); }
     .timer-btn.cancel { grid-column: span 3; background: rgba(255,68,68,0.12); border-color: rgba(255,68,68,0.3); color: #FF5252; }
     .timer-btn.cancel:active { background: #FF5252; color: #FFF; }
+
+    /* Kanal Sıralama Sürükle-Bırak */
+    .reorder-list { display: flex; flex-direction: column; gap: 8px; max-height: 380px; overflow-y: auto; padding-right: 2px; }
+    .reorder-item {
+      display: flex; align-items: center; justify-content: space-between; padding: 12px 14px;
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 14px; transition: all 0.15s; touch-action: none;
+    }
+    .reorder-item.dragging { opacity: 0.45; background: rgba(0, 229, 255, 0.15); border-color: #00E5FF; transform: scale(0.98); }
+    .reorder-item.drag-over { border-top: 2px solid #00E5FF; background: rgba(0, 229, 255, 0.08); }
+    .reorder-handle {
+      padding: 6px 8px; cursor: grab; color: #8F9CAE; display: flex; align-items: center; justify-content: center;
+      touch-action: none;
+    }
+    .reorder-handle svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2.2; }
+    .reorder-handle:active { cursor: grabbing; color: #00E5FF; }
 
     /* Alt Sabit Navigasyon */
     .bottom-nav {
@@ -1339,6 +1430,17 @@ class CastServerManager(
             <span class="slider"></span>
           </label>
         </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-title">AirPlay PIN Kodu Koruması</span>
+            <span class="setting-sub">Bağlantıda TV'de 4 haneli PIN kodu ister</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="switch-cast-pin" onchange="updateSetting('cast_pin_enabled', this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
       </div>
 
       <!-- Uyku Zamanlayıcı Kartı -->
@@ -1349,13 +1451,25 @@ class CastServerManager(
         </div>
         <div class="card-desc">Süre dolduğunda TV yayını ve sesi otomatik durdurulur.</div>
         <div class="timer-grid">
-          <div class="timer-btn" onclick="setSleep(15)">15 Dk</div>
-          <div class="timer-btn" onclick="setSleep(30)">30 Dk</div>
-          <div class="timer-btn" onclick="setSleep(45)">45 Dk</div>
-          <div class="timer-btn" onclick="setSleep(60)">60 Dk</div>
-          <div class="timer-btn" onclick="setSleep(90)">90 Dk</div>
-          <div class="timer-btn" onclick="setSleep(120)">120 Dk</div>
-          <div class="timer-btn cancel" onclick="setSleep(0)">Zamanlayıcıyı Kapat</div>
+          <div class="timer-btn" id="timer-15" onclick="setSleep(15)">15 Dk</div>
+          <div class="timer-btn" id="timer-30" onclick="setSleep(30)">30 Dk</div>
+          <div class="timer-btn" id="timer-45" onclick="setSleep(45)">45 Dk</div>
+          <div class="timer-btn" id="timer-60" onclick="setSleep(60)">60 Dk</div>
+          <div class="timer-btn" id="timer-90" onclick="setSleep(90)">90 Dk</div>
+          <div class="timer-btn" id="timer-120" onclick="setSleep(120)">120 Dk</div>
+          <div class="timer-btn cancel" id="timer-0" onclick="setSleep(0)">Zamanlayıcıyı Kapat</div>
+        </div>
+      </div>
+
+      <!-- Kanal Sıralama Kartı (Sürükle & Bırak) -->
+      <div class="settings-card">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+          Kanal Sıralaması (Sürükle & Bırak)
+        </div>
+        <div class="card-desc">Kanal sırasını değiştirmek için sağdaki tutamaktan basılı tutup sürükleyin. TV anında güncellenir.</div>
+        <div id="reorderList" class="reorder-list">
+          <div style="text-align:center; color:#64748B; padding:16px;">Kanallar yükleniyor...</div>
         </div>
       </div>
 
@@ -1432,8 +1546,27 @@ class CastServerManager(
       inp.value = '';
     }
 
+    function updateSleepUI(min) {
+      [15, 30, 45, 60, 90, 120].forEach(function(m) {
+        var btn = document.getElementById('timer-' + m);
+        if (btn) {
+          if (min > 0 && Math.abs(min - m) <= 4) {
+            btn.classList.add('active');
+          } else {
+            btn.classList.remove('active');
+          }
+        }
+      });
+      var cancelBtn = document.getElementById('timer-0');
+      if (cancelBtn) {
+        if (min === 0) cancelBtn.style.opacity = '0.5';
+        else cancelBtn.style.opacity = '1';
+      }
+    }
+
     function setSleep(min) {
       vibrate();
+      updateSleepUI(min);
       if (min === 0) {
         showToast('Uyku zamanlayıcı kapatıldı');
       } else {
@@ -1453,8 +1586,8 @@ class CastServerManager(
       document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
       document.getElementById('tab-' + tabId).classList.add('active');
       el.classList.add('active');
-      if (tabId === 'channels' && channelsData.length === 0) {
-        loadChannels();
+      if (tabId === 'channels') {
+        if (channelsData.length === 0) loadChannels();
       } else if (tabId === 'settings') {
         loadSettings();
       }
@@ -1466,6 +1599,7 @@ class CastServerManager(
         .then(function(data) {
           channelsData = data || [];
           renderChannels(channelsData);
+          renderReorderList(channelsData);
         })
         .catch(function() {
           document.getElementById('channelList').innerHTML = '<div style="text-align:center; color:#FF6666; padding:20px;">Kanallar yüklenemedi.</div>';
@@ -1540,8 +1674,15 @@ class CastServerManager(
             document.getElementById('switch-auto-boot').checked = s.auto_start_on_boot !== false;
           if (document.getElementById('switch-cast-enabled'))
             document.getElementById('switch-cast-enabled').checked = s.cast_enabled !== false;
+          if (document.getElementById('switch-cast-pin'))
+            document.getElementById('switch-cast-pin').checked = s.cast_pin_enabled === true;
+
+          // TV'deki aktif uyku süresi
+          updateSleepUI(s.sleep_minutes || 0);
         })
         .catch(function(){});
+
+      loadReorderList();
     }
 
     function updateSetting(key, val) {
@@ -1558,6 +1699,134 @@ class CastServerManager(
         showToast('Ayar Güncellendi');
       }
       fetch('/api/settings_update?key=' + encodeURIComponent(key) + '&val=' + encodeURIComponent(val), { method: 'POST' }).catch(function(){});
+    }
+
+    // --- SÜRÜKLE & BIRAK KANAL SIRALAMA MOTORU ---
+    var draggedIndex = null;
+
+    function loadReorderList() {
+      if (channelsData && channelsData.length > 0) {
+        renderReorderList(channelsData);
+      } else {
+        fetch('/api/channels')
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            channelsData = data || [];
+            renderReorderList(channelsData);
+          })
+          .catch(function(){});
+      }
+    }
+
+    function renderReorderList(list) {
+      var container = document.getElementById('reorderList');
+      if (!container) return;
+      if (!list || list.length === 0) {
+        container.innerHTML = '<div style="text-align:center; color:#64748B; padding:16px;">Kanal bulunamadı.</div>';
+        return;
+      }
+      var html = '';
+      list.forEach(function(ch, idx) {
+        var num = (idx + 1).toString().padStart(2, '0');
+        html += '<div class="reorder-item" draggable="true" data-index="' + idx + '" data-id="' + ch.id + '">' +
+                  '<div class="ch-left">' +
+                    '<span class="ch-num">' + num + '</span>' +
+                    '<span class="ch-name">' + ch.name + '</span>' +
+                  '</div>' +
+                  '<div class="reorder-handle">' +
+                    '<svg viewBox="0 0 24 24"><line x1="4" y1="8" x2="20" y2="8"></line><line x1="4" y1="16" x2="20" y2="16"></line></svg>' +
+                  '</div>' +
+                '</div>';
+      });
+      container.innerHTML = html;
+      attachReorderEvents(container);
+    }
+
+    function attachReorderEvents(container) {
+      var items = container.querySelectorAll('.reorder-item');
+      items.forEach(function(item) {
+        // Masaüstü Drag & Drop
+        item.addEventListener('dragstart', function(e) {
+          draggedIndex = parseInt(this.getAttribute('data-index'), 10);
+          this.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        item.addEventListener('dragend', function() {
+          this.classList.remove('dragging');
+          container.querySelectorAll('.reorder-item').forEach(function(el){ el.classList.remove('drag-over'); });
+        });
+        item.addEventListener('dragover', function(e) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          this.classList.add('drag-over');
+        });
+        item.addEventListener('dragleave', function() {
+          this.classList.remove('drag-over');
+        });
+        item.addEventListener('drop', function(e) {
+          e.preventDefault();
+          this.classList.remove('drag-over');
+          var targetIndex = parseInt(this.getAttribute('data-index'), 10);
+          if (draggedIndex !== null && draggedIndex !== targetIndex) {
+            moveChannelItem(draggedIndex, targetIndex);
+          }
+        });
+
+        // Mobil Dokunmatik (Touch) Sürükleme Desteği
+        var handle = item.querySelector('.reorder-handle');
+        if (handle) {
+          var activeTouchItem = null;
+          handle.addEventListener('touchstart', function(e) {
+            activeTouchItem = item;
+            item.classList.add('dragging');
+            vibrate();
+          }, { passive: true });
+
+          handle.addEventListener('touchmove', function(e) {
+            if (!activeTouchItem) return;
+            var touchY = e.touches[0].clientY;
+            var touchX = e.touches[0].clientX;
+            var elementBelow = document.elementFromPoint(touchX, touchY);
+            var targetRow = elementBelow ? elementBelow.closest('.reorder-item') : null;
+            container.querySelectorAll('.reorder-item').forEach(function(el){ el.classList.remove('drag-over'); });
+            if (targetRow && targetRow !== activeTouchItem) {
+              targetRow.classList.add('drag-over');
+            }
+          }, { passive: true });
+
+          handle.addEventListener('touchend', function(e) {
+            if (!activeTouchItem) return;
+            activeTouchItem.classList.remove('dragging');
+            var touch = e.changedTouches[0];
+            var elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+            var targetRow = elementBelow ? elementBelow.closest('.reorder-item') : null;
+            container.querySelectorAll('.reorder-item').forEach(function(el){ el.classList.remove('drag-over'); });
+            if (targetRow && targetRow !== activeTouchItem) {
+              var fromIdx = parseInt(activeTouchItem.getAttribute('data-index'), 10);
+              var toIdx = parseInt(targetRow.getAttribute('data-index'), 10);
+              moveChannelItem(fromIdx, toIdx);
+            }
+            activeTouchItem = null;
+          });
+        }
+      });
+    }
+
+    function moveChannelItem(fromIdx, toIdx) {
+      vibrate();
+      var moved = channelsData.splice(fromIdx, 1)[0];
+      channelsData.splice(toIdx, 0, moved);
+      renderReorderList(channelsData);
+      if (document.getElementById('channelList')) {
+        renderChannels(channelsData);
+      }
+      showToast('TV Sıralaması Güncellendi');
+      var ids = channelsData.map(function(c){ return c.id; });
+      fetch('/api/reorder_channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ids)
+      }).catch(function(){});
     }
   </script>
 </body>
@@ -1628,6 +1897,18 @@ class CastServerManager(
     private fun notifyPositionChanged(pos: Double, duration: Double) {
         mainHandler.post {
             channel.invokeMethod("onPositionChanged", mapOf("position" to pos, "duration" to duration))
+        }
+    }
+
+    private fun notifyShowPinCode(pin: String, clientName: String) {
+        mainHandler.post {
+            channel.invokeMethod("onShowPinCode", mapOf("pin" to pin, "clientName" to clientName))
+        }
+    }
+
+    private fun notifyHidePinCode() {
+        mainHandler.post {
+            channel.invokeMethod("onHidePinCode", null)
         }
     }
 }

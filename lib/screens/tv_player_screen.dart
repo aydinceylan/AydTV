@@ -79,6 +79,11 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   String _bufferMode = 'balanced';
   bool _isSettingsOpen = false;
 
+  // AirPlay PIN Güvenlik Diyaloğu
+  bool _isPinDialogOpen = false;
+  String? _airplayPin;
+  String? _airplayPinClient;
+
   Future<void> _loadBufferSetting() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
@@ -187,7 +192,16 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
       setState(() => _isCastPlaying = true);
     };
 
-    // Telefondan Akıllı Web Kumanda Komutları
+    _castService.onShowPinCode = (pin, client) {
+      if (!mounted) return;
+      _showAirPlayPinDialog(pin, client);
+    };
+
+    _castService.onHidePinCode = () {
+      if (!mounted) return;
+      _hideAirPlayPinDialog();
+    };
+
     // Telefondan Akıllı Web Kumanda Komutları
     _castService.onRemoteCommand = (action, value) {
       if (!mounted) return;
@@ -239,15 +253,15 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
         }
       }
 
-      // 3. Normal Tam Ekran Canlı TV Modu
+      // 3. Normal Tam Ekran Canlı TV Modu (Global TV Standardı: Yukarı/CH+ = Sonraki Kanal +1, Aşağı/CH- = Önceki Kanal -1)
       switch (action) {
         case 'up':
         case 'channel_up':
-          _onChannelStep(-1);
+          _onChannelStep(1);
           break;
         case 'down':
         case 'channel_down':
-          _onChannelStep(1);
+          _onChannelStep(-1);
           break;
         case 'left':
           _onChannelStep(-1);
@@ -349,6 +363,30 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
             _showToast('Yayın yeniden başlatılıyor');
           }
           break;
+        case 'reorder_channels':
+          if (value is List) {
+            final orderIds = value.map((e) => e.toString()).toList();
+            final map = {for (var c in _channels) c.id: c};
+            final ordered = <Channel>[];
+            for (var id in orderIds) {
+              if (map.containsKey(id)) {
+                ordered.add(map.remove(id)!);
+              }
+            }
+            ordered.addAll(map.values);
+            setState(() {
+              _channels = ordered;
+              if (_currentChannel != null) {
+                final idx = _channels.indexWhere((c) => c.id == _currentChannel!.id);
+                _currentChannelIndex = idx != -1 ? idx : 0;
+                _targetChannelIndex = _currentChannelIndex;
+              }
+            });
+            _channelService.saveChannelOrder(ordered);
+            _syncChannelsWithCastService();
+            _showToast('Kanal sıralaması telefondan güncellendi');
+          }
+          break;
       }
     };
   }
@@ -391,8 +429,31 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
       final b = val == true || val.toString() == 'true';
       await prefs.setBool('cast_enabled', b);
       _showToast(b ? 'AirPlay / DLNA Aktif' : 'AirPlay / DLNA Kapalı');
+    } else if (key == 'cast_pin_enabled') {
+      final b = val == true || val.toString() == 'true';
+      await prefs.setBool('cast_pin_enabled', b);
+      _showToast(b ? 'AirPlay PIN Koruması Açık' : 'AirPlay PIN Koruması Kapalı');
+      _castService.startServer(pinEnabled: b);
     }
     _syncSettingsWithCastService();
+  }
+
+  void _showAirPlayPinDialog(String pin, String? client) {
+    if (!mounted) return;
+    setState(() {
+      _airplayPin = pin;
+      _airplayPinClient = client;
+      _isPinDialogOpen = true;
+    });
+  }
+
+  void _hideAirPlayPinDialog() {
+    if (!mounted) return;
+    setState(() {
+      _isPinDialogOpen = false;
+      _airplayPin = null;
+      _airplayPinClient = null;
+    });
   }
 
   void _syncChannelsWithCastService() {
@@ -1093,11 +1154,11 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
         _showZappingBar = false;
       });
       return KeyEventResult.handled;
-    } else if (key == LogicalKeyboardKey.arrowDown || key == LogicalKeyboardKey.channelDown) {
-      _onChannelStep(1); // Aşağı tuş = sonraki kanal (TV mantığı)
-      return KeyEventResult.handled;
     } else if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.channelUp) {
-      _onChannelStep(-1); // Yukarı tuş = önceki kanal
+      _onChannelStep(1); // Yukarı tuş / CH+ = Sonraki kanal (+1, Global TV standardı)
+      return KeyEventResult.handled;
+    } else if (key == LogicalKeyboardKey.arrowDown || key == LogicalKeyboardKey.channelDown) {
+      _onChannelStep(-1); // Aşağı tuş / CH- = Önceki kanal (-1, Global TV standardı)
       return KeyEventResult.handled;
     } else if (key == LogicalKeyboardKey.arrowRight) {
       _onChannelStep(1);
@@ -1174,6 +1235,11 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
+        // AirPlay PIN Güvenlik Diyaloğu açıksa kapat
+        if (_isPinDialogOpen) {
+          _hideAirPlayPinDialog();
+          return;
+        }
         // Ekran paylaşımı aktifse onay sorup TV yayınına dön
         if (_isCasting) {
           CastDisconnectDialog.show(
@@ -1357,6 +1423,12 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
                     if (mounted) setState(() => _showCastToast = false);
                   },
                 ),
+
+              // 7. AİPLAY GÜVENLİK PIN KODU PENCERESİ
+              if (_isPinDialogOpen && _airplayPin != null)
+                Positioned.fill(
+                  child: _buildPinCodeOverlay(),
+                ),
             ],
           ),
         ),
@@ -1454,6 +1526,113 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPinCodeOverlay() {
+    final pin = _airplayPin ?? '----';
+    return Container(
+      color: Colors.black.withValues(alpha: 0.88),
+      child: Center(
+        child: Container(
+          width: 520,
+          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 36),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.5), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: TVTheme.focusCyan.withValues(alpha: 0.25),
+                blurRadius: 40,
+                spreadRadius: 4,
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 68,
+                height: 68,
+                decoration: BoxDecoration(
+                  color: TVTheme.focusCyan.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.4), width: 1.5),
+                ),
+                child: const Icon(Icons.airplay_rounded, size: 36, color: TVTheme.focusCyan),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'AirPlay Güvenlik Kodu',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _airplayPinClient != null
+                    ? '${_airplayPinClient!} aygıtında bu kodu girin:'
+                    : 'Apple aygıtınızda bu güvenlik kodunu girin:',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 15,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 28),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: pin.split('').map((digit) {
+                  return Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                    width: 64,
+                    height: 76,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: TVTheme.focusCyan, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: TVTheme.focusCyan.withValues(alpha: 0.3),
+                          blurRadius: 16,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      digit,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 38,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 28),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: const Text(
+                  'İptal etmek için TV Kumandasından GERİ tuşuna basın',
+                  style: TextStyle(color: Colors.white60, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

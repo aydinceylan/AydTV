@@ -15,6 +15,15 @@ class ChannelService {
   static const String remoteUrl =
       'https://raw.githubusercontent.com/aydinceylan/AydTV/main/channels.json';
 
+  static const Set<String> _blacklistedIds = {
+    'tjktv2',
+    'natgeowild',
+    'natgeohd',
+    'kralpoptv',
+    'caytv',
+    'tv52',
+  };
+
   /// Kanalları önce yerel önbellek / asset'ten yükler (0 ms açılış)
   Future<List<Channel>> loadInitialChannels() async {
     try {
@@ -31,7 +40,10 @@ class ChannelService {
       }
 
       final List<dynamic> decoded = jsonDecode(rawData);
-      final channels = decoded.map((item) => Channel.fromJson(item)).toList();
+      final channels = decoded
+          .map((item) => Channel.fromJson(item))
+          .where((c) => !_blacklistedIds.contains(c.id.toLowerCase()))
+          .toList();
 
       for (var ch in channels) {
         if (favoriteIds.contains(ch.id)) {
@@ -89,8 +101,10 @@ class ChannelService {
           final favoriteIds = prefs.getStringList(_favoritesKey) ?? [];
 
           final List<dynamic> decoded = jsonDecode(response.body);
-          final channels =
-              decoded.map((item) => Channel.fromJson(item)).toList();
+          final channels = decoded
+              .map((item) => Channel.fromJson(item))
+              .where((c) => !_blacklistedIds.contains(c.id.toLowerCase()))
+              .toList();
 
           for (var ch in channels) {
             if (favoriteIds.contains(ch.id)) {

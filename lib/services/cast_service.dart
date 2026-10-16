@@ -37,6 +37,8 @@ class CastService {
   VoidCallback? onMediaResumed;
   void Function(double position, double duration)? onPositionChanged;
   void Function(String action, dynamic value)? onRemoteCommand;
+  void Function(String pin, String clientName)? onShowPinCode;
+  VoidCallback? onHidePinCode;
 
   bool _isServerRunning = false;
   bool get isServerRunning => _isServerRunning;
@@ -196,6 +198,17 @@ class CastService {
         final action = (args?['action'] ?? '').toString();
         final value = args?['value'];
         onRemoteCommand?.call(action, value);
+        break;
+
+      case 'onShowPinCode':
+        final args = call.arguments as Map?;
+        final pin = (args?['pin'] ?? '1234').toString();
+        final client = (args?['client'] ?? 'Apple Cihazı').toString();
+        onShowPinCode?.call(pin, client);
+        break;
+
+      case 'onHidePinCode':
+        onHidePinCode?.call();
         break;
     }
   }

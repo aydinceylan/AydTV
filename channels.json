@@ -377,17 +377,6 @@
     "epgId": null
   },
   {
-    "id": "tjktv2",
-    "name": "TJK TV 2 (Yurt Dışı)",
-    "category": "Spor",
-    "logo": "https://upload.wikimedia.org/wikipedia/tr/thumb/8/86/TJK_TV_logo.png/800px-TJK_TV_logo.png",
-    "url": "https://tjktv-live.tjk.org/tjktv2/tjktv2_1080p.m3u8",
-    "backupUrls": [
-      "https://tjktv-live.tjk.org/tjktv2/tjktv2.m3u8"
-    ],
-    "epgId": null
-  },
-  {
     "id": "trtbelgesel",
     "name": "TRT Belgesel",
     "category": "Sinema & Belgesel",
@@ -408,24 +397,6 @@
     "epgId": "131"
   },
   {
-    "id": "natgeowild",
-    "name": "Nat Geo Wild",
-    "category": "Sinema & Belgesel",
-    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/National_Geographic_Wild_logo.svg/800px-National_Geographic_Wild_logo.svg.png",
-    "url": "https://saran-live.ercdn.net/natgeowild/index.m3u8",
-    "backupUrls": [],
-    "epgId": null
-  },
-  {
-    "id": "natgeohd",
-    "name": "National Geographic HD",
-    "category": "Sinema & Belgesel",
-    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/National_Geographic_logo.svg/800px-National_Geographic_logo.svg.png",
-    "url": "https://saran-live.ercdn.net/natgeohd/index.m3u8",
-    "backupUrls": [],
-    "epgId": null
-  },
-  {
     "id": "powerturktv",
     "name": "PowerTürk TV",
     "category": "Müzik",
@@ -433,15 +404,6 @@
     "url": "https://live.artidijitalmedya.com/artidijital_powerturktv/powerturktv/playlist.m3u8",
     "backupUrls": [],
     "epgId": "202"
-  },
-  {
-    "id": "kralpoptv",
-    "name": "Kral Pop TV",
-    "category": "Müzik",
-    "logo": "https://i.imgur.com/ch365lh.png",
-    "url": "https://dogus-live.daioncdn.net/kralpoptv/playlist.m3u8",
-    "backupUrls": [],
-    "epgId": null
   },
   {
     "id": "dreamturk",
@@ -547,29 +509,11 @@
     "epgId": null
   },
   {
-    "id": "caytv",
-    "name": "Çay TV (Rize)",
-    "category": "Yerel",
-    "logo": "https://i.imgur.com/ndupxwu.png",
-    "url": "https://edge1.socialsmart.tv/caytv/bant1/playlist.m3u8",
-    "backupUrls": [],
-    "epgId": null
-  },
-  {
     "id": "kanal23",
     "name": "Kanal 23 (Elazığ)",
     "category": "Yerel",
     "logo": "https://i.imgur.com/3br8RCq.png",
     "url": "https://cdn-kanal23.yayin.com.tr/kanal23/index.m3u8",
-    "backupUrls": [],
-    "epgId": null
-  },
-  {
-    "id": "tv52",
-    "name": "TV 52 (Ordu)",
-    "category": "Yerel",
-    "logo": "https://i.imgur.com/k4R5CzO.png",
-    "url": "https://edge1.socialsmart.tv/tv52/bant1/playlist.m3u8",
     "backupUrls": [],
     "epgId": null
   },
