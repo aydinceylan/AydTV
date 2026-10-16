@@ -656,7 +656,7 @@ class CastServerManager(
                             val plist = com.dd.plist.PropertyListParser.parse(bodyBytes) as? com.dd.plist.NSDictionary
                             val ekeyData = plist?.objectForKey("ekey") as? com.dd.plist.NSData
                             if (ekeyData != null) {
-                                ekeyBytes = ekeyData.bytes
+                                ekeyBytes = ekeyData.bytes()
                                 android.util.Log.i("CastServer", "SETUP isteğinde 72-bayt ekey başarıyla ayrıştırıldı.")
                             }
                             val streams = plist?.objectForKey("streams") as? com.dd.plist.NSArray
