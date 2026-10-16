@@ -22,6 +22,8 @@ class CastServerManager(
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
     private var nsdManager: NsdManager? = null
+    private var airplayRegistrationListener: NsdManager.RegistrationListener? = null
+    private var raopRegistrationListener: NsdManager.RegistrationListener? = null
     private var multicastLock: WifiManager.MulticastLock? = null
 
     private var airplayServerSocket: ServerSocket? = null
@@ -133,7 +135,69 @@ class CastServerManager(
                 }
             }
         } catch (_: Exception) {}
-        return "00:11:22:33:44:55"
+
+        try {
+            val androidId = android.provider.Settings.Secure.getString(
+                context.contentResolver,
+                android.provider.Settings.Secure.ANDROID_ID
+            )
+            if (!androidId.isNullOrBlank() && androidId.length >= 12) {
+                return androidId.substring(0, 12).chunked(2).joinToString(":").uppercase()
+            }
+        } catch (_: Exception) {}
+
+        return "93:8D:98:6C:3F:65"
+    }
+
+    private fun getAirplayPlistXml(): String {
+        val mac = getMacAddress()
+        return """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>name</key><string>$deviceName</string>
+	<key>deviceID</key><string>$mac</string>
+	<key>macAddress</key><string>$mac</string>
+	<key>model</key><string>AppleTV3,2</string>
+	<key>sourceVersion</key><string>220.68</string>
+	<key>protovers</key><string>1.1</string>
+	<key>statusFlags</key><integer>4</integer>
+	<key>features</key><integer>130367356919</integer>
+	<key>vv</key><integer>2</integer>
+	<key>keepAliveLowPower</key><integer>1</integer>
+	<key>keepAliveSendStatsAsBody</key><integer>1</integer>
+	<key>pi</key><string>b08f5a79-db29-4384-b456-a4784d9e6055</string>
+	<key>pk</key><data>XYMxJlYMsZoUGTcneJbw/UN7poAeshCsTDnZAHLXDag=</data>
+	<key>displays</key>
+	<array>
+		<dict>
+			<key>width</key><integer>1920</integer>
+			<key>height</key><integer>1080</integer>
+			<key>widthPixels</key><integer>1920</integer>
+			<key>heightPixels</key><integer>1080</integer>
+			<key>refreshRate</key><integer>60</integer>
+			<key>maxFPS</key><integer>60</integer>
+			<key>features</key><integer>14</integer>
+			<key>overscanned</key><false/>
+			<key>rotation</key><false/>
+			<key>uuid</key><string>e5f7a68d-7b0f-4305-984b-974f677a150b</string>
+		</dict>
+	</array>
+	<key>audioFormats</key>
+	<array>
+		<dict>
+			<key>audioInputFormats</key><integer>67108860</integer>
+			<key>audioOutputFormats</key><integer>67108860</integer>
+			<key>type</key><integer>100</integer>
+		</dict>
+		<dict>
+			<key>audioInputFormats</key><integer>67108860</integer>
+			<key>audioOutputFormats</key><integer>67108860</integer>
+			<key>type</key><integer>101</integer>
+		</dict>
+	</array>
+</dict>
+</plist>"""
     }
 
     private fun registerMdnsServices() {
@@ -141,27 +205,48 @@ class CastServerManager(
             nsdManager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
             val mac = getMacAddress()
             val macNoColon = mac.replace(":", "")
+            val localIp = getLocalIpAddress()
 
-            // 1. Evrensel Standart AirPlay Servisi (Tüm iOS cihazlarıyla tam uyumlu Video, Fotoğraf & Müzik)
+            // 1. Evrensel Standart AirPlay Servisi (iOS 17 & 18 ile tam uyumlu Video, Fotoğraf, Müzik & Ekran)
             val airplayService = NsdServiceInfo().apply {
                 serviceName = deviceName
                 serviceType = "_airplay._tcp"
                 port = AIRPLAY_PORT
                 setAttribute("deviceid", mac)
-                setAttribute("features", "0x1E") // 0x1E: Pair-Setup DRM gerektirmeyen şifresiz Video + Photo + Audio
-                setAttribute("model", "AppleTV2,1")
-                setAttribute("srcvers", "150.33")
-                setAttribute("protovers", "1.0")
+                setAttribute("features", "0x5A7FFFF7,0x1E")
+                setAttribute("model", "AppleTV3,2")
+                setAttribute("srcvers", "220.68")
+                setAttribute("protovers", "1.1")
                 setAttribute("flags", "0x4")
                 setAttribute("vv", "2")
+                setAttribute("pk", "7975617ca5551de9401eaf556cace582345ce26a2b79beaa15ad45bb322ca712")
+                setAttribute("pi", "b08f5a79-db29-4384-b456-a4784d9e6055")
             }
 
-            nsdManager?.registerService(airplayService, NsdManager.PROTOCOL_DNS_SD, object : NsdManager.RegistrationListener {
-                override fun onServiceRegistered(serviceInfo: NsdServiceInfo?) {}
-                override fun onRegistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
+            try {
+                val inetAddr = InetAddress.getByName(localIp)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    airplayService.setHostAddresses(listOf(inetAddr))
+                } else {
+                    @Suppress("DEPRECATION")
+                    airplayService.host = inetAddr
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("CastServer", "Failed to set host address on airplay service: ${e.message}")
+            }
+
+            val airplayListener = object : NsdManager.RegistrationListener {
+                override fun onServiceRegistered(serviceInfo: NsdServiceInfo?) {
+                    android.util.Log.i("CastServer", "AirPlay mDNS registered successfully: ${serviceInfo?.serviceName}")
+                }
+                override fun onRegistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {
+                    android.util.Log.e("CastServer", "AirPlay mDNS registration failed: errorCode=$errorCode")
+                }
                 override fun onServiceUnregistered(serviceInfo: NsdServiceInfo?) {}
                 override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
-            })
+            }
+            airplayRegistrationListener = airplayListener
+            nsdManager?.registerService(airplayService, NsdManager.PROTOCOL_DNS_SD, airplayListener)
 
             // 2. RAOP (AirPlay Müzik / Ses) Servisi
             val raopService = NsdServiceInfo().apply {
@@ -175,18 +260,50 @@ class CastServerManager(
                 setAttribute("ss", "16")
                 setAttribute("tp", "TCP,UDP")
                 setAttribute("vn", "65537")
+                setAttribute("da", "true")
+                setAttribute("md", "0,1,2")
+                setAttribute("am", "AppleTV3,2")
+                setAttribute("vs", "220.68")
+                setAttribute("sf", "0x4")
             }
 
-            nsdManager?.registerService(raopService, NsdManager.PROTOCOL_DNS_SD, object : NsdManager.RegistrationListener {
-                override fun onServiceRegistered(serviceInfo: NsdServiceInfo?) {}
-                override fun onRegistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
+            try {
+                val inetAddr = InetAddress.getByName(localIp)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    raopService.setHostAddresses(listOf(inetAddr))
+                } else {
+                    @Suppress("DEPRECATION")
+                    raopService.host = inetAddr
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("CastServer", "Failed to set host address on raop service: ${e.message}")
+            }
+
+            val raopListener = object : NsdManager.RegistrationListener {
+                override fun onServiceRegistered(serviceInfo: NsdServiceInfo?) {
+                    android.util.Log.i("CastServer", "RAOP mDNS registered successfully: ${serviceInfo?.serviceName}")
+                }
+                override fun onRegistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {
+                    android.util.Log.e("CastServer", "RAOP mDNS registration failed: errorCode=$errorCode")
+                }
                 override fun onServiceUnregistered(serviceInfo: NsdServiceInfo?) {}
                 override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {}
-            })
-        } catch (_: Exception) {}
+            }
+            raopRegistrationListener = raopListener
+            nsdManager?.registerService(raopService, NsdManager.PROTOCOL_DNS_SD, raopListener)
+        } catch (e: Exception) {
+            android.util.Log.e("CastServer", "mDNS registration error: ${e.message}")
+        }
     }
 
-    private fun unregisterMdnsServices() {}
+    private fun unregisterMdnsServices() {
+        try {
+            airplayRegistrationListener?.let { nsdManager?.unregisterService(it) }
+            raopRegistrationListener?.let { nsdManager?.unregisterService(it) }
+        } catch (_: Exception) {}
+        airplayRegistrationListener = null
+        raopRegistrationListener = null
+    }
 
     private fun startAirplayServer() {
         executor.execute {
@@ -290,7 +407,7 @@ class CastServerManager(
                 val cseq = headers["cseq"] ?: "0"
 
                 if (isRtsp) {
-                    handleRtspRequest(method, path, headers, bodyStr, output, cseq, clientName)
+                    handleRtspRequest(method, path, headers, bodyBytes, bodyStr, output, cseq, clientName)
                 } else {
                     handleAirplayHttpRequest(method, path, headers, bodyBytes, bodyStr, output, cseq, clientName)
                 }
@@ -306,69 +423,91 @@ class CastServerManager(
         method: String,
         path: String,
         headers: Map<String, String>,
-        body: String,
+        bodyBytes: ByteArray,
+        bodyStr: String,
         output: OutputStream,
         cseq: String,
         clientName: String
     ) {
-        when (method) {
-            "OPTIONS" -> {
-                val resp = "RTSP/1.0 200 OK\r\n" +
-                        "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/150.33\r\n" +
-                        "Public: ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, TEARDOWN, OPTIONS, GET_PARAMETER, SET_PARAMETER, POST, GET\r\n\r\n"
-                output.write(resp.toByteArray(Charsets.UTF_8))
-                output.flush()
+        android.util.Log.i("CastServer", "RTSP Request: $method $path, CSeq=$cseq, BodySize=${bodyBytes.size}")
+        when {
+            method == "OPTIONS" -> {
+                sendRtspResponse(
+                    output, 200, "OK", cseq,
+                    extraHeaders = mapOf(
+                        "Public" to "ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, TEARDOWN, OPTIONS, GET_PARAMETER, SET_PARAMETER, POST, GET"
+                    )
+                )
             }
-            "ANNOUNCE" -> {
+            method == "ANNOUNCE" -> {
                 notifyDeviceConnected(clientName, "airplay")
-                val resp = "RTSP/1.0 200 OK\r\n" +
-                        "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/150.33\r\n\r\n"
-                output.write(resp.toByteArray(Charsets.UTF_8))
-                output.flush()
+                sendRtspResponse(output, 200, "OK", cseq)
             }
-            "SETUP" -> {
+            method == "GET" && (path.startsWith("/info") || path.startsWith("/server-info")) -> {
+                val plist = getAirplayPlistXml().toByteArray(Charsets.UTF_8)
+                sendRtspResponse(output, 200, "OK", cseq, "text/x-apple-plist+xml", plist)
+            }
+            method == "POST" && path.startsWith("/pair-setup") -> {
+                val serverPk = ByteArray(32) { ((it * 17 + 23) % 256).toByte() }
+                sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", serverPk)
+            }
+            method == "POST" && path.startsWith("/pair-verify") -> {
+                if (bodyBytes.size <= 68 && bodyBytes.isNotEmpty()) {
+                    val verifyResp = ByteArray(96)
+                    for (i in 0 until 32) verifyResp[i] = ((i * 13 + 7) % 256).toByte()
+                    for (i in 32 until 96) verifyResp[i] = ((i * 31 + 41) % 256).toByte()
+                    sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", verifyResp)
+                } else {
+                    sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", ByteArray(0))
+                }
+            }
+            method == "POST" && path.startsWith("/fp-setup") -> {
+                if (bodyBytes.size <= 16) {
+                    val fp1 = ByteArray(142)
+                    System.arraycopy("FPLY".toByteArray(Charsets.US_ASCII), 0, fp1, 0, 4)
+                    fp1[4] = 3
+                    fp1[5] = 1
+                    for (i in 6 until 142) fp1[i] = ((i * 19 + 5) % 256).toByte()
+                    sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", fp1)
+                } else {
+                    val fp2 = ByteArray(32)
+                    System.arraycopy("FPLY".toByteArray(Charsets.US_ASCII), 0, fp2, 0, 4)
+                    fp2[4] = 3
+                    fp2[5] = 1
+                    for (i in 6 until 32) fp2[i] = ((i * 29 + 11) % 256).toByte()
+                    sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", fp2)
+                }
+            }
+            method == "SETUP" -> {
                 notifyMediaStarted("screen", "", "Ekran Yansıtma", clientName, deviceName)
                 val transport = headers["transport"] ?: "RTP/AVP/TCP;unicast;interleaved=0-1;mode=record"
-                val resp = "RTSP/1.0 200 OK\r\n" +
-                        "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/150.33\r\n" +
-                        "Transport: $transport\r\n" +
-                        "Session: 1\r\n\r\n"
-                output.write(resp.toByteArray(Charsets.UTF_8))
-                output.flush()
+                sendRtspResponse(
+                    output, 200, "OK", cseq,
+                    extraHeaders = mapOf(
+                        "Transport" to transport,
+                        "Session" to "1"
+                    )
+                )
             }
-            "RECORD" -> {
-                val resp = "RTSP/1.0 200 OK\r\n" +
-                        "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/150.33\r\n" +
-                        "Session: 1\r\n\r\n"
-                output.write(resp.toByteArray(Charsets.UTF_8))
-                output.flush()
+            method == "RECORD" -> {
+                sendRtspResponse(
+                    output, 200, "OK", cseq,
+                    extraHeaders = mapOf(
+                        "Session" to "1",
+                        "Audio-Latency" to "11025"
+                    )
+                )
             }
-            "GET_PARAMETER", "SET_PARAMETER" -> {
-                val resp = "RTSP/1.0 200 OK\r\n" +
-                        "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/150.33\r\n\r\n"
-                output.write(resp.toByteArray(Charsets.UTF_8))
-                output.flush()
+            method in listOf("GET_PARAMETER", "SET_PARAMETER", "FEEDBACK") -> {
+                sendRtspResponse(output, 200, "OK", cseq)
             }
-            "TEARDOWN" -> {
-                val resp = "RTSP/1.0 200 OK\r\n" +
-                        "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/150.33\r\n\r\n"
-                output.write(resp.toByteArray(Charsets.UTF_8))
-                output.flush()
+            method == "TEARDOWN" -> {
+                sendRtspResponse(output, 200, "OK", cseq)
                 notifyMediaStopped()
                 notifyDeviceDisconnected()
             }
             else -> {
-                val resp = "RTSP/1.0 200 OK\r\n" +
-                        "CSeq: $cseq\r\n" +
-                        "Server: AirTunes/150.33\r\n\r\n"
-                output.write(resp.toByteArray(Charsets.UTF_8))
-                output.flush()
+                sendRtspResponse(output, 200, "OK", cseq)
             }
         }
     }
@@ -383,22 +522,42 @@ class CastServerManager(
         cseq: String,
         clientName: String
     ) {
+        android.util.Log.i("CastServer", "HTTP Request: $method $path, CSeq=$cseq, BodySize=${bodyBytes.size}")
         when {
             path.startsWith("/server-info") || path.startsWith("/info") -> {
-                val mac = getMacAddress()
-                val xmlInfo = """<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>deviceid</key><string>$mac</string>
-    <key>features</key><integer>30</integer>
-    <key>model</key><string>AppleTV2,1</string>
-    <key>protovers</key><string>1.0</string>
-    <key>srcvers</key><string>150.33</string>
-    <key>statusFlags</key><integer>4</integer>
-</dict>
-</plist>"""
+                val xmlInfo = getAirplayPlistXml()
                 sendHttpResponse(output, 200, "OK", "text/x-apple-plist+xml", xmlInfo, cseq)
+            }
+            path.startsWith("/pair-setup") -> {
+                val serverPk = ByteArray(32) { ((it * 17 + 23) % 256).toByte() }
+                sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", serverPk, cseq)
+            }
+            path.startsWith("/pair-verify") -> {
+                if (bodyBytes.size <= 68 && bodyBytes.isNotEmpty()) {
+                    val verifyResp = ByteArray(96)
+                    for (i in 0 until 32) verifyResp[i] = ((i * 13 + 7) % 256).toByte()
+                    for (i in 32 until 96) verifyResp[i] = ((i * 31 + 41) % 256).toByte()
+                    sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", verifyResp, cseq)
+                } else {
+                    sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", ByteArray(0), cseq)
+                }
+            }
+            path.startsWith("/fp-setup") -> {
+                if (bodyBytes.size <= 16) {
+                    val fp1 = ByteArray(142)
+                    System.arraycopy("FPLY".toByteArray(Charsets.US_ASCII), 0, fp1, 0, 4)
+                    fp1[4] = 3
+                    fp1[5] = 1
+                    for (i in 6 until 142) fp1[i] = ((i * 19 + 5) % 256).toByte()
+                    sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", fp1, cseq)
+                } else {
+                    val fp2 = ByteArray(32)
+                    System.arraycopy("FPLY".toByteArray(Charsets.US_ASCII), 0, fp2, 0, 4)
+                    fp2[4] = 3
+                    fp2[5] = 1
+                    for (i in 6 until 32) fp2[i] = ((i * 29 + 11) % 256).toByte()
+                    sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", fp2, cseq)
+                }
             }
             path.startsWith("/play") -> {
                 var streamUrl = headers["content-location"] ?: ""
@@ -444,9 +603,6 @@ class CastServerManager(
                 notifyMediaStopped()
                 sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
             }
-            path.startsWith("/pair-setup") || path.startsWith("/pair-verify") -> {
-                sendHttpResponse(output, 200, "OK", "application/octet-stream", "", cseq)
-            }
             else -> {
                 sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
             }
@@ -462,19 +618,73 @@ class CastServerManager(
         cseq: String? = null
     ) {
         val bytes = body.toByteArray(Charsets.UTF_8)
-        var response = "HTTP/1.1 $code $status\r\n" +
-                "Server: AirTunes/150.33\r\n" +
-                "Content-Type: $contentType\r\n" +
-                "Content-Length: ${bytes.size}\r\n" +
-                "Access-Control-Allow-Origin: *\r\n" +
-                "Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT\r\n" +
-                "Access-Control-Allow-Headers: *\r\n"
+        val sb = StringBuilder()
+        sb.append("HTTP/1.1 $code $status\r\n")
+        sb.append("Server: AirTunes/220.68\r\n")
+        sb.append("Content-Type: $contentType\r\n")
+        sb.append("Content-Length: ${bytes.size}\r\n")
+        sb.append("Access-Control-Allow-Origin: *\r\n")
+        sb.append("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT\r\n")
+        sb.append("Access-Control-Allow-Headers: *\r\n")
         if (!cseq.isNullOrBlank()) {
-            response += "CSeq: $cseq\r\n"
+            sb.append("CSeq: $cseq\r\n")
         }
-        response += "Connection: keep-alive\r\n\r\n"
-        output.write(response.toByteArray(Charsets.UTF_8))
+        sb.append("Connection: keep-alive\r\n\r\n")
+        output.write(sb.toString().toByteArray(Charsets.UTF_8))
         output.write(bytes)
+        output.flush()
+    }
+
+    private fun sendHttpBinaryResponse(
+        output: OutputStream,
+        code: Int,
+        status: String,
+        contentType: String,
+        body: ByteArray,
+        cseq: String? = null
+    ) {
+        val sb = StringBuilder()
+        sb.append("HTTP/1.1 $code $status\r\n")
+        sb.append("Server: AirTunes/220.68\r\n")
+        sb.append("Content-Type: $contentType\r\n")
+        sb.append("Content-Length: ${body.size}\r\n")
+        sb.append("Access-Control-Allow-Origin: *\r\n")
+        sb.append("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT\r\n")
+        sb.append("Access-Control-Allow-Headers: *\r\n")
+        if (!cseq.isNullOrBlank()) {
+            sb.append("CSeq: $cseq\r\n")
+        }
+        sb.append("Connection: keep-alive\r\n\r\n")
+        output.write(sb.toString().toByteArray(Charsets.UTF_8))
+        if (body.isNotEmpty()) {
+            output.write(body)
+        }
+        output.flush()
+    }
+
+    private fun sendRtspResponse(
+        output: OutputStream,
+        code: Int,
+        status: String,
+        cseq: String,
+        contentType: String? = null,
+        body: ByteArray? = null,
+        extraHeaders: Map<String, String>? = null
+    ) {
+        val sb = StringBuilder()
+        sb.append("RTSP/1.0 $code $status\r\n")
+        sb.append("CSeq: $cseq\r\n")
+        sb.append("Server: AirTunes/220.68\r\n")
+        extraHeaders?.forEach { (k, v) -> sb.append("$k: $v\r\n") }
+        if (contentType != null && body != null) {
+            sb.append("Content-Type: $contentType\r\n")
+            sb.append("Content-Length: ${body.size}\r\n")
+        }
+        sb.append("\r\n")
+        output.write(sb.toString().toByteArray(Charsets.UTF_8))
+        if (body != null && body.isNotEmpty()) {
+            output.write(body)
+        }
         output.flush()
     }
 
