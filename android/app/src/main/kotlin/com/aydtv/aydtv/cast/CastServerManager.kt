@@ -171,7 +171,7 @@ class CastServerManager(
 	<key>sourceVersion</key><string>220.68</string>
 	<key>protovers</key><string>1.1</string>
 	<key>statusFlags</key><integer>4</integer>
-	<key>features</key><integer>130367356919</integer>
+	<key>features</key><integer>1384120311</integer>
 	<key>vv</key><integer>2</integer>
 	<key>keepAliveLowPower</key><integer>1</integer>
 	<key>keepAliveSendStatsAsBody</key><integer>1</integer>
@@ -216,18 +216,19 @@ class CastServerManager(
             val macNoColon = mac.replace(":", "")
             val localIp = getLocalIpAddress()
 
-            // 1. Evrensel Standart AirPlay Servisi (iOS 17 & 18 ile tam uyumlu Video, Fotoğraf, Müzik & Ekran)
+            // 1. Evrensel Standart AirPlay Servisi (Bit 27 OFF: Şifresiz ve Doğrudan Yansıtma)
             val airplayService = NsdServiceInfo().apply {
                 serviceName = deviceName
                 serviceType = "_airplay._tcp"
                 port = AIRPLAY_PORT
                 setAttribute("deviceid", mac)
-                setAttribute("features", "0x5A7FFFF7,0x1E")
+                setAttribute("features", "0x527FFFF7,0x0")
                 setAttribute("model", "AppleTV3,2")
                 setAttribute("srcvers", "220.68")
                 setAttribute("protovers", "1.1")
                 setAttribute("flags", "0x4")
                 setAttribute("vv", "2")
+                setAttribute("pw", "false")
                 setAttribute("pk", "7975617ca5551de9401eaf556cace582345ce26a2b79beaa15ad45bb322ca712")
                 setAttribute("pi", "b08f5a79-db29-4384-b456-a4784d9e6055")
             }
@@ -264,7 +265,7 @@ class CastServerManager(
                 port = AIRPLAY_PORT
                 setAttribute("ch", "2")
                 setAttribute("cn", "0,1,2,3")
-                setAttribute("et", "0,1")
+                setAttribute("et", "0,3,5")
                 setAttribute("sr", "44100")
                 setAttribute("ss", "16")
                 setAttribute("tp", "TCP,UDP")
@@ -274,6 +275,8 @@ class CastServerManager(
                 setAttribute("am", "AppleTV3,2")
                 setAttribute("vs", "220.68")
                 setAttribute("sf", "0x4")
+                setAttribute("pw", "false")
+                setAttribute("features", "0x527FFFF7,0x0")
             }
 
             try {
@@ -510,7 +513,7 @@ class CastServerManager(
                     val fp2 = ByteArray(32)
                     System.arraycopy("FPLY".toByteArray(Charsets.US_ASCII), 0, fp2, 0, 4)
                     fp2[4] = 3
-                    fp2[5] = 1
+                    fp2[5] = 2
                     for (i in 6 until 32) fp2[i] = ((i * 29 + 11) % 256).toByte()
                     sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", fp2)
                 }
@@ -593,7 +596,7 @@ class CastServerManager(
                     val fp2 = ByteArray(32)
                     System.arraycopy("FPLY".toByteArray(Charsets.US_ASCII), 0, fp2, 0, 4)
                     fp2[4] = 3
-                    fp2[5] = 1
+                    fp2[5] = 2
                     for (i in 6 until 32) fp2[i] = ((i * 29 + 11) % 256).toByte()
                     sendHttpBinaryResponse(output, 200, "OK", "application/octet-stream", fp2, cseq)
                 }
