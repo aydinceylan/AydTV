@@ -9,6 +9,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONArray
 import java.io.*
@@ -38,6 +39,8 @@ class CastServerManager(
     private var activePinCode: String? = null
     private var pinExpiryRunnable: Runnable? = null
     private var activeClientSocket: Socket? = null
+    private var isDisplayingPhoto = false
+    private val cachedPhotos = mutableMapOf<String, File>()
 
     fun showPin(clientName: String) {
         if (activePinCode == null) {
@@ -407,11 +410,11 @@ class CastServerManager(
             var clientName = "Apple Cihazı"
 
             while (isRunning && !socket.isClosed) {
-                val first = rawInput.read()
-                if (first == -1) break
+                val p0 = rawInput.read()
+                if (p0 == -1) break
 
                 // 1. RFC 2326 Interleaved RTP binary packet ($ = 0x24)
-                if (first == 0x24) {
+                if (p0 == 0x24) {
                     val channelId = rawInput.read()
                     val lenH = rawInput.read()
                     val lenL = rawInput.read()
@@ -428,14 +431,22 @@ class CastServerManager(
                     continue
                 }
 
-                // 2. Binary mirror stream packet (128-byte header starting with 4-byte payload size)
-                if (first !in 65..90) {
-                    val b1 = rawInput.read()
-                    val b2 = rawInput.read()
-                    val b3 = rawInput.read()
-                    if (b1 == -1 || b2 == -1 || b3 == -1) break
-                    val payloadSize = (first and 0xFF) or ((b1 and 0xFF) shl 8) or ((b2 and 0xFF) shl 16) or ((b3 and 0xFF) shl 24)
-                    if (payloadSize in 1..20000000) {
+                // 2. HTTP / RTSP komutu mu yoksa binary mirror frame mi kontrol et
+                val p1 = rawInput.read()
+                val p2 = rawInput.read()
+                val p3 = rawInput.read()
+                if (p1 == -1 || p2 == -1 || p3 == -1) break
+
+                val fourBytes = byteArrayOf(p0.toByte(), p1.toByte(), p2.toByte(), p3.toByte())
+                val prefixStr = try { String(fourBytes, Charsets.US_ASCII) } catch (_: Exception) { "" }
+                val isHttpOrRtsp = prefixStr in listOf(
+                    "GET ", "POST", "PUT ", "HEAD", "OPTI", "SETU", "RECO", "TEAR", "ANNO", "PAUS", "FLUS", "GET_", "SET_"
+                )
+
+                if (!isHttpOrRtsp) {
+                    // Binary mirror stream packet (128-byte header starting with 4-byte payload size)
+                    val payloadSize = (p0 and 0xFF) or ((p1 and 0xFF) shl 8) or ((p2 and 0xFF) shl 16) or ((p3 and 0xFF) shl 24)
+                    if (payloadSize in 0..20000000) {
                         var headerSkip = 0
                         val hBuf = ByteArray(124)
                         while (headerSkip < 124) {
@@ -455,9 +466,9 @@ class CastServerManager(
                     continue
                 }
 
-                // 3. Normal HTTP / RTSP text command
+                // 3. Normal HTTP / RTSP metin komutu
                 val headerBytes = ByteArrayOutputStream()
-                headerBytes.write(first)
+                headerBytes.write(fourBytes)
                 var b: Int
 
                 while (rawInput.read().also { b = it } != -1) {
@@ -542,10 +553,10 @@ class CastServerManager(
         } finally {
             try { socket.close() } catch (_: Exception) {}
             val remaining = activeConnections.decrementAndGet()
-            if (remaining <= 0) {
+            if (remaining <= 0 && !isDisplayingPhoto) {
                 disconnectRunnable?.let { mainHandler.removeCallbacks(it) }
                 disconnectRunnable = Runnable {
-                    if (activeConnections.get() <= 0) {
+                    if (activeConnections.get() <= 0 && !isDisplayingPhoto) {
                         notifyDeviceDisconnected()
                     }
                 }
@@ -745,11 +756,27 @@ class CastServerManager(
             }
             path.startsWith("/photo") -> {
                 try {
-                    val photoFile = File(context.cacheDir, "airplay_photo.jpg")
-                    photoFile.writeBytes(bodyBytes)
-                    notifyDeviceConnected(clientName, "airplay")
-                    notifyMediaStarted("photo", photoFile.absolutePath, "AirPlay Fotoğrafı", clientName, deviceName)
-                } catch (_: Exception) {}
+                    val assetAction = headers["x-apple-assetaction"] ?: "display"
+                    val assetKey = headers["x-apple-assetkey"] ?: "default"
+                    android.util.Log.i("CastServer", "Photo request: action=$assetAction, key=$assetKey, bodySize=${bodyBytes.size}")
+
+                    val photoFile = if (bodyBytes.isNotEmpty()) {
+                        val file = File(context.cacheDir, "airplay_photo_${assetKey.hashCode()}.jpg")
+                        file.writeBytes(bodyBytes)
+                        cachedPhotos[assetKey] = file
+                        file
+                    } else {
+                        cachedPhotos[assetKey] ?: File(context.cacheDir, "airplay_photo.jpg")
+                    }
+
+                    if (assetAction != "cache" && photoFile.exists() && photoFile.length() > 0) {
+                        isDisplayingPhoto = true
+                        notifyDeviceConnected(clientName, "airplay")
+                        notifyMediaStarted("photo", photoFile.absolutePath, "AirPlay Fotoğrafı", clientName, deviceName)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("CastServer", "Photo error: ${e.message}")
+                }
                 sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
             }
             path.startsWith("/rate") -> {
@@ -1039,6 +1066,49 @@ class CastServerManager(
                             channel.invokeMethod("onRemoteCommand", mapOf("action" to "reorder_channels", "value" to ids))
                         }
                     }
+                    sendHttpResponse(output, 200, "OK", "application/json", "{\"status\":\"ok\"}")
+                }
+                path.startsWith("/api/cast_photo") -> {
+                    try {
+                        val jsonObj = org.json.JSONObject(bodyStr)
+                        var base64Data = jsonObj.optString("image", "")
+                        if (base64Data.contains(",")) {
+                            base64Data = base64Data.substringAfter(",")
+                        }
+                        if (base64Data.isNotBlank()) {
+                            val imgBytes = Base64.decode(base64Data, Base64.DEFAULT)
+                            val photoFile = File(context.cacheDir, "web_photo_${System.currentTimeMillis()}.jpg")
+                            photoFile.writeBytes(imgBytes)
+                            isDisplayingPhoto = true
+                            notifyDeviceConnected("Telefon", "web_remote")
+                            notifyMediaStarted("photo", photoFile.absolutePath, "Fotoğraf", "Telefon", deviceName)
+                            sendHttpResponse(output, 200, "OK", "application/json", "{\"status\":\"ok\"}")
+                            return
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("CastServer", "Web photo error: ${e.message}")
+                    }
+                    sendHttpResponse(output, 400, "Bad Request", "application/json", "{\"status\":\"error\"}")
+                }
+                path.startsWith("/api/cast_video") -> {
+                    try {
+                        val jsonObj = org.json.JSONObject(bodyStr)
+                        val videoUrl = jsonObj.optString("url", "").trim()
+                        if (videoUrl.isNotBlank()) {
+                            isDisplayingPhoto = false
+                            notifyDeviceConnected("Telefon", "web_remote")
+                            notifyMediaStarted("video", videoUrl, "Video", "Telefon", deviceName)
+                            sendHttpResponse(output, 200, "OK", "application/json", "{\"status\":\"ok\"}")
+                            return
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("CastServer", "Web video error: ${e.message}")
+                    }
+                    sendHttpResponse(output, 400, "Bad Request", "application/json", "{\"status\":\"error\"}")
+                }
+                path.startsWith("/api/close_media") -> {
+                    isDisplayingPhoto = false
+                    notifyMediaStopped()
                     sendHttpResponse(output, 200, "OK", "application/json", "{\"status\":\"ok\"}")
                 }
                 else -> {
@@ -1620,9 +1690,58 @@ class CastServerManager(
         </div>
       </div>
     </div>
+
+    <!-- SEKME 3: MEDYA & FOTOĞRAF PAYLAŞ -->
+    <div id="tab-media" class="tab-content">
+      <!-- Fotoğraf Yansıtma Kartı -->
+      <div class="settings-card">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+          Fotoğraf Yansıt
+        </div>
+        <div class="card-desc">Galerinizden dilediğiniz fotoğrafı seçin, televizyonda anında tam ekran gösterilsin.</div>
+        <input type="file" id="mediaPhotoInput" accept="image/*" style="display:none" onchange="handlePhotoUpload(this)">
+        <div class="sys-btn" style="width:100%; height:52px; background:rgba(0,229,255,0.12); border-color:#00E5FF; color:#00E5FF; font-size:15px;" onclick="document.getElementById('mediaPhotoInput').click()">
+          <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+          Galeriden Fotoğraf Seç & Yansıt
+        </div>
+        <div id="photoPreviewContainer" style="display:none; width:100%; margin-top:14px; text-align:center;">
+          <div style="font-size:12px; color:#00E5FF; font-weight:700; margin-bottom:8px;">TV'DE GÖSTERİLİYOR</div>
+          <img id="photoPreview" style="max-width:100%; max-height:180px; border-radius:14px; border:1.5px solid #00E5FF; object-fit:contain; background:#000;">
+          <div style="margin-top:12px;">
+            <div class="sys-btn danger" style="width:100%; height:46px;" onclick="closeTvMedia()">
+              <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              Medya Paylaşımını Kapat / TV'ye Dön
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Video / Medya Bağlantısı Yansıtma Kartı -->
+      <div class="settings-card">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+          Video / Medya Bağlantısı Yansıt
+        </div>
+        <div class="card-desc">Herhangi bir video linki (MP4, HLS, Web) yapıştırarak TV'de tam ekran oynatabilirsiniz.</div>
+        <div style="width:100%; display:flex; gap:8px;">
+          <input type="text" id="videoUrlInput" placeholder="https://ornek.com/video.mp4" style="flex:1; height:46px; border-radius:14px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#FFF; padding:0 14px; font-size:14px;">
+          <div class="sys-btn" style="width:90px; height:46px; background:#00E5FF; color:#070B14; font-weight:700;" onclick="castVideoUrl()">Oynat</div>
+        </div>
+      </div>
+
+      <!-- AirPlay Bilgilendirme Kartı -->
+      <div class="settings-card">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"></path><polygon points="12 15 17 21 7 21 12 15"></polygon></svg>
+          Apple AirPlay & DLNA
+        </div>
+        <div class="card-desc">iPhone, iPad veya Mac cihazınızdaki Fotoğraflar veya Safari uygulamasında AirPlay simgesine dokunup "AydTV" seçerek de doğrudan gönderebilirsiniz.</div>
+      </div>
+    </div>
   </div>
 
-  <!-- Sabit Alt Menü: Kumanda / Kanallar / Ayarlar -->
+  <!-- Sabit Alt Menü: Kumanda / Kanallar / Paylaş / Ayarlar -->
   <div class="bottom-nav">
     <div class="nav-item active" onclick="switchTab('remote', this)">
       <svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="4"></rect><circle cx="12" cy="7" r="1"></circle><circle cx="12" cy="11" r="1"></circle><circle cx="12" cy="15" r="1"></circle><circle cx="12" cy="18" r="1"></circle></svg>
@@ -1631,6 +1750,10 @@ class CastServerManager(
     <div class="nav-item" onclick="switchTab('channels', this)">
       <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect><polyline points="17 2 12 7 7 2"></polyline></svg>
       <div>Kanallar</div>
+    </div>
+    <div class="nav-item" onclick="switchTab('media', this)">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+      <div>Paylaş</div>
     </div>
     <div class="nav-item" onclick="switchTab('settings', this)">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -2043,6 +2166,76 @@ class CastServerManager(
         });
     }
 
+    // --- MEDYA & FOTOĞRAF PAYLAŞMA FONKSİYONLARI ---
+    function handlePhotoUpload(input) {
+      if (!input.files || !input.files[0]) return;
+      var file = input.files[0];
+      vibrate();
+      showToast('Fotoğraf TV\'ye aktarılıyor...');
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        var base64 = e.target.result;
+        var preview = document.getElementById('photoPreview');
+        var container = document.getElementById('photoPreviewContainer');
+        if (preview && container) {
+          preview.src = base64;
+          container.style.display = 'block';
+        }
+        fetch('/api/cast_photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64 })
+        }).then(function(res) {
+          return res.json();
+        }).then(function(data) {
+          if (data && data.status === 'ok') {
+            showToast('Fotoğraf TV\'de Açıldı');
+          } else {
+            showToast('Fotoğraf aktarılamadı');
+          }
+        }).catch(function() {
+          showToast('Bağlantı hatası');
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function castVideoUrl() {
+      var input = document.getElementById('videoUrlInput');
+      if (!input || !input.value.trim()) {
+        showToast('Lütfen geçerli bir video linki girin');
+        return;
+      }
+      var url = input.value.trim();
+      vibrate();
+      showToast('Video TV\'ye aktarılıyor...');
+      fetch('/api/cast_video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url })
+      }).then(function(res) {
+        return res.json();
+      }).then(function(data) {
+        if (data && data.status === 'ok') {
+          showToast('Video TV\'de oynatılıyor');
+          input.value = '';
+        } else {
+          showToast('Video başlatılamadı');
+        }
+      }).catch(function() {
+        showToast('Bağlantı hatası');
+      });
+    }
+
+    function closeTvMedia() {
+      vibrate();
+      fetch('/api/close_media', { method: 'POST' }).then(function() {
+        showToast('TV Yayınına dönüldü');
+        var container = document.getElementById('photoPreviewContainer');
+        if (container) container.style.display = 'none';
+      }).catch(function(){});
+    }
+
     setInterval(pollStatusAndSettings, 1500);
     pollStatusAndSettings();
     loadChannels();
@@ -2060,6 +2253,7 @@ class CastServerManager(
                 notifyPositionChanged(seconds, 100.0)
             }
             "disconnect" -> {
+                isDisplayingPhoto = false
                 try {
                     activeClientSocket?.close()
                 } catch (_: Exception) {}

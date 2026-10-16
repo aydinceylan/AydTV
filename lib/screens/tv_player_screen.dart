@@ -1525,14 +1525,29 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     if (_currentCastMedia?.mediaType == 'photo' && _currentCastMedia!.url.isNotEmpty) {
       return Container(
         color: Colors.black,
+        width: double.infinity,
+        height: double.infinity,
         child: Stack(
           alignment: Alignment.center,
           children: [
-            Image.file(
-              File(_currentCastMedia!.url),
-              fit: BoxFit.contain,
-              width: double.infinity,
-              height: double.infinity,
+            Center(
+              child: Image.file(
+                File(_currentCastMedia!.url),
+                key: ValueKey('${_currentCastMedia!.url}_${_currentCastMedia!.title}'),
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+                errorBuilder: (context, error, stackTrace) => Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.broken_image_rounded, size: 72, color: Colors.white38),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Fotoğraf görüntülenemedi: $error',
+                      style: const TextStyle(color: Colors.white70, fontSize: 16),
+                    ),
+                  ],
+                ),
+              ),
             ),
             Positioned(
               top: 24,
@@ -1540,7 +1555,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.7),
+                  color: Colors.black.withValues(alpha: 0.75),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.4)),
                 ),
@@ -1550,10 +1565,25 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
                     const Icon(Icons.photo_library_rounded, color: TVTheme.focusCyan, size: 18),
                     const SizedBox(width: 8),
                     Text(
-                      '📷 ${_connectedCastDevice ?? "AirPlay"}',
+                      '📷 ${_connectedCastDevice ?? "Fotoğraf"}',
                       style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
                     ),
                   ],
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 24,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: const Text(
+                  'Fotoğrafı kapatmak için TV Kumandasından GERİ tuşuna basın',
+                  style: TextStyle(color: Colors.white70, fontSize: 13),
                 ),
               ),
             ),
@@ -1615,35 +1645,82 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
 
     return Container(
       color: Colors.black,
+      width: double.infinity,
+      height: double.infinity,
       child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.airplay_rounded, size: 88, color: TVTheme.focusCyan),
-            const SizedBox(height: 20),
-            Text(
-              '📱 ${_connectedCastDevice ?? "Apple / Android Cihazı"}',
-              style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Kablosuz Ekran Yansıtılıyor (1080p 60 FPS)',
-              style: TextStyle(color: TVTheme.focusCyan, fontSize: 16),
-            ),
-            const SizedBox(height: 28),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.white12,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white24),
+        child: Container(
+          width: 580,
+          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 36),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.45), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: TVTheme.focusCyan.withValues(alpha: 0.22),
+                blurRadius: 40,
+                spreadRadius: 4,
               ),
-              child: const Text(
-                'TV Yayınına dönmek için kumandadan GERİ tuşuna basın',
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 76,
+                height: 76,
+                decoration: BoxDecoration(
+                  color: TVTheme.focusCyan.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.4), width: 1.5),
+                ),
+                child: const Icon(Icons.airplay_rounded, size: 42, color: TVTheme.focusCyan),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                '📱 ${_connectedCastDevice ?? "Apple / Mobil Cihaz"} Bağlandı',
+                style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Telefondan video açtığınızda veya fotoğraf paylaştığınızda TV\'de otomatik tam ekran gösterilir.',
                 style: TextStyle(color: Colors.white70, fontSize: 14),
+                textAlign: TextAlign.center,
               ),
-            ),
-          ],
+              const SizedBox(height: 22),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.photo_library_rounded, color: TVTheme.focusCyan, size: 20),
+                    const SizedBox(width: 10),
+                    const Text(
+                      'Mobil Kumanda: Fotoğraf & Video Yansıtma Hazır',
+                      style: TextStyle(color: TVTheme.focusCyan, fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white12,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Text(
+                  'TV Yayınına dönmek için TV Kumandasından GERİ tuşuna basın',
+                  style: TextStyle(color: Colors.white60, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
