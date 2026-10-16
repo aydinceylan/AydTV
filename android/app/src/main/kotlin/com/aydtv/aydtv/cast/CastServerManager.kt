@@ -126,6 +126,8 @@ class CastServerManager(
             webRemoteServerSocket?.close()
         } catch (_: Exception) {}
 
+        AirPlayMirrorDecoder.stop()
+
         activeClientSocket = null
         airplayServerSocket = null
         raopServerSocket = null
@@ -454,14 +456,23 @@ class CastServerManager(
                             if (r == -1) break
                             headerSkip += r
                         }
-                        var pSkip = 0
-                        val pBuf = ByteArray(minOf(payloadSize, 16384))
-                        while (pSkip < payloadSize) {
-                            val toRead = minOf(pBuf.size, payloadSize - pSkip)
-                            val r = rawInput.read(pBuf, 0, toRead)
+                        if (headerSkip < 124) break
+
+                        val payloadType = (hBuf[0].toInt() and 0xFF) or ((hBuf[1].toInt() and 0xFF) shl 8)
+                        val payloadOption = (hBuf[2].toInt() and 0xFF) or ((hBuf[3].toInt() and 0xFF) shl 8)
+
+                        // Payload verisini oku
+                        val pBuf = ByteArray(payloadSize)
+                        var pRead = 0
+                        while (pRead < payloadSize) {
+                            val r = rawInput.read(pBuf, pRead, payloadSize - pRead)
                             if (r == -1) break
-                            pSkip += r
+                            pRead += r
                         }
+                        if (pRead < payloadSize) break
+
+                        // Donanımsal H.264 çözücüye aktar (Flutter Texture Surface'e 60 FPS basar)
+                        AirPlayMirrorDecoder.feedPacket(payloadType, payloadOption, hBuf, pBuf)
                     }
                     continue
                 }
@@ -678,6 +689,7 @@ class CastServerManager(
             }
             method == "TEARDOWN" -> {
                 hidePin()
+                AirPlayMirrorDecoder.stop()
                 sendRtspResponse(output, 200, "OK", cseq)
                 notifyMediaStopped()
                 notifyDeviceDisconnected()

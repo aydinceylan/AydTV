@@ -86,6 +86,11 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   String? _airplayPin;
   String? _airplayPinClient;
 
+  // Canlı Ekran Yansıtma (AirPlay Screen Mirroring 60 FPS Hardware Texture)
+  int? _mirrorTextureId;
+  double _mirrorWidth = 1920.0;
+  double _mirrorHeight = 1080.0;
+
   Future<void> _loadBufferSetting() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
@@ -206,6 +211,35 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     _castService.onShowPinCode = (pin, client) {
       if (!mounted) return;
       _showAirPlayPinDialog(pin, client);
+    };
+
+    _castService.onMirrorStarted = (textureId, width, height) {
+      if (!mounted) return;
+      _stuckCounter = 0;
+      setState(() {
+        _mirrorTextureId = textureId;
+        _mirrorWidth = width > 0 ? width : 1920.0;
+        _mirrorHeight = height > 0 ? height : 1080.0;
+        _isCasting = true;
+        _connectedCastDevice = _castService.connectedDeviceName ?? 'Apple Cihazı';
+      });
+      // Canlı TV yayınını duraklat ve sesini tamamen kes
+      _controller?.setVolume(0.0);
+      _controller?.pause();
+    };
+
+    _castService.onMirrorStopped = () {
+      if (!mounted) return;
+      setState(() {
+        _mirrorTextureId = null;
+        if (_currentCastMedia == null) {
+          _isCasting = false;
+        }
+      });
+      if (!_isCasting) {
+        _controller?.setVolume(1.0);
+        _controller?.play();
+      }
     };
 
     _castService.onHidePinCode = () {
@@ -1504,6 +1538,66 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   }
 
   Widget _buildCastContent() {
+    // 1. CANLI EKRAN YANSITMA (AirPlay Screen Mirroring 60 FPS Hardware Texture)
+    if (_mirrorTextureId != null) {
+      return Container(
+        color: Colors.black,
+        width: double.infinity,
+        height: double.infinity,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Center(
+              child: AspectRatio(
+                aspectRatio: (_mirrorWidth > 0 && _mirrorHeight > 0)
+                    ? (_mirrorWidth / _mirrorHeight)
+                    : (16 / 9),
+                child: Texture(textureId: _mirrorTextureId!),
+              ),
+            ),
+            Positioned(
+              top: 24,
+              right: 28,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.75),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.screen_share_rounded, color: TVTheme.focusCyan, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      '📱 ${_connectedCastDevice ?? "Canlı Ekran"}',
+                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 24,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: const Text(
+                  'Ekran yansıtmayı kapatmak için TV Kumandasından GERİ tuşuna basın',
+                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (_currentCastMedia?.isAudioOnly == true) {
       return CastMusicView(
         media: _currentCastMedia!,

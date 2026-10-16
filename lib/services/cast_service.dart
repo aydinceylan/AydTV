@@ -39,6 +39,8 @@ class CastService {
   void Function(String action, dynamic value)? onRemoteCommand;
   void Function(String pin, String clientName)? onShowPinCode;
   VoidCallback? onHidePinCode;
+  void Function(int textureId, double width, double height)? onMirrorStarted;
+  VoidCallback? onMirrorStopped;
 
   bool _isServerRunning = false;
   bool get isServerRunning => _isServerRunning;
@@ -213,6 +215,18 @@ class CastService {
 
       case 'onHidePinCode':
         onHidePinCode?.call();
+        break;
+
+      case 'onMirrorStarted':
+        final args = call.arguments as Map?;
+        final textureId = (args?['textureId'] as num?)?.toInt() ?? 0;
+        final w = (args?['width'] as num?)?.toDouble() ?? 1920.0;
+        final h = (args?['height'] as num?)?.toDouble() ?? 1080.0;
+        onMirrorStarted?.call(textureId, w, h);
+        break;
+
+      case 'onMirrorStopped':
+        onMirrorStopped?.call();
         break;
     }
   }

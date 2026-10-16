@@ -7,15 +7,19 @@ import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.KeyEvent
+import android.view.Surface
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.view.TextureRegistry
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.aydtv.aydtv/system"
     private val CAST_CHANNEL = "com.aydtv.aydtv/cast"
     private var castServerManager: com.aydtv.aydtv.cast.CastServerManager? = null
+    private var mirrorTextureEntry: TextureRegistry.SurfaceTextureEntry? = null
+    private var mirrorSurface: Surface? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,8 +75,33 @@ class MainActivity : FlutterActivity() {
         val castChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CAST_CHANNEL)
         castServerManager = com.aydtv.aydtv.cast.CastServerManager(this, castChannel)
 
+        // Flutter donanımsal GPU Surface Texture oluştur ve AirPlayMirrorDecoder'a bağla
+        try {
+            val entry = flutterEngine.renderer.createSurfaceTexture()
+            mirrorTextureEntry = entry
+            val surface = Surface(entry.surfaceTexture())
+            mirrorSurface = surface
+            com.aydtv.aydtv.cast.AirPlayMirrorDecoder.attachSurface(surface, entry.id())
+            com.aydtv.aydtv.cast.AirPlayMirrorDecoder.onMirrorStateListener = { isStarted, textureId, width, height ->
+                if (isStarted) {
+                    castChannel.invokeMethod("onMirrorStarted", mapOf(
+                        "textureId" to textureId,
+                        "width" to width,
+                        "height" to height
+                    ))
+                } else {
+                    castChannel.invokeMethod("onMirrorStopped", null)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Failed to create Flutter SurfaceTexture: ${e.message}")
+        }
+
         castChannel.setMethodCallHandler { call, result ->
             when (call.method) {
+                "getMirrorTextureId" -> {
+                    result.success(mirrorTextureEntry?.id() ?: -1L)
+                }
                 "startServer" -> {
                     val name = call.argument<String>("deviceName") ?: "AydTV"
                     val isPin = call.argument<Boolean>("pinEnabled") ?: false
@@ -201,6 +230,12 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        com.aydtv.aydtv.cast.AirPlayMirrorDecoder.stop()
+        try {
+            mirrorTextureEntry?.release()
+        } catch (_: Exception) {}
+        mirrorTextureEntry = null
+        mirrorSurface = null
         castServerManager?.stop()
         super.onDestroy()
     }
