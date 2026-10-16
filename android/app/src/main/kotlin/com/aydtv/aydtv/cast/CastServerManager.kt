@@ -407,8 +407,57 @@ class CastServerManager(
             var clientName = "Apple Cihazı"
 
             while (isRunning && !socket.isClosed) {
-                // HTTP / RTSP Header'ları güvenli ve hızlı şekilde bayt bazlı oku
+                val first = rawInput.read()
+                if (first == -1) break
+
+                // 1. RFC 2326 Interleaved RTP binary packet ($ = 0x24)
+                if (first == 0x24) {
+                    val channelId = rawInput.read()
+                    val lenH = rawInput.read()
+                    val lenL = rawInput.read()
+                    if (channelId == -1 || lenH == -1 || lenL == -1) break
+                    val packetLen = ((lenH and 0xFF) shl 8) or (lenL and 0xFF)
+                    var skipped = 0
+                    val skipBuf = ByteArray(minOf(packetLen, 8192))
+                    while (skipped < packetLen) {
+                        val toRead = minOf(skipBuf.size, packetLen - skipped)
+                        val r = rawInput.read(skipBuf, 0, toRead)
+                        if (r == -1) break
+                        skipped += r
+                    }
+                    continue
+                }
+
+                // 2. Binary mirror stream packet (128-byte header starting with 4-byte payload size)
+                if (first !in 65..90) {
+                    val b1 = rawInput.read()
+                    val b2 = rawInput.read()
+                    val b3 = rawInput.read()
+                    if (b1 == -1 || b2 == -1 || b3 == -1) break
+                    val payloadSize = (first and 0xFF) or ((b1 and 0xFF) shl 8) or ((b2 and 0xFF) shl 16) or ((b3 and 0xFF) shl 24)
+                    if (payloadSize in 1..20000000) {
+                        var headerSkip = 0
+                        val hBuf = ByteArray(124)
+                        while (headerSkip < 124) {
+                            val r = rawInput.read(hBuf, headerSkip, 124 - headerSkip)
+                            if (r == -1) break
+                            headerSkip += r
+                        }
+                        var pSkip = 0
+                        val pBuf = ByteArray(minOf(payloadSize, 16384))
+                        while (pSkip < payloadSize) {
+                            val toRead = minOf(pBuf.size, payloadSize - pSkip)
+                            val r = rawInput.read(pBuf, 0, toRead)
+                            if (r == -1) break
+                            pSkip += r
+                        }
+                    }
+                    continue
+                }
+
+                // 3. Normal HTTP / RTSP text command
                 val headerBytes = ByteArrayOutputStream()
+                headerBytes.write(first)
                 var b: Int
 
                 while (rawInput.read().also { b = it } != -1) {

@@ -10,14 +10,12 @@ import shutil
 
 REPO = "aydinceylan/AydTV"
 TAG = "v1.3.0"
-RELEASE_NAME = "AydTV v1.3.0 - Çift Yönlü Mobil Senkronizasyon, Canlı Ses/Kanal & AirPlay Kopma Düzeltmesi"
+RELEASE_NAME = "AydTV v1.3.0 - AirPlay Medya Video Oynatıcısı, RTP Ayrıştırıcı & TV Sesi İzolasyonu"
 COMMIT_HASH = None
 RELEASE_NOTES = """## AydTV v1.3.0 Yenilikleri
-- 🔄 **Çift Yönlü Canlı Senkronizasyon:** TV'de yapılan ayar veya ses değişiklikleri mobil kumandaya, mobilde yapılanlar ise TV'ye anında yansıtılır.
-- 🔊 **Canlı TV Ses Seviyesi ve Mute Durumu:** Mobil kumandada anlık ses seviyesi (%XX) ve Mute (Sessizde) durumu canlı olarak görüntülenir ve kontrol edilir.
-- 📺 **Aktif Kanal Canlı Vurgusu:** TV'de o an izlenen kanal hem mobil kumanda ana ekranında hem de Kanallar sekmesinde canlı rozetle vurgulanır.
-- 🍏 **AirPlay Kopma Düzeltmesi (GET_PARAMETER):** iPhone'un bağlantı kurulduktan sonra sorguladığı ses parametresi (GET_PARAMETER volume) standart Apple TV formatında yanıtlanarak 2-3 saniye sonra yayının kopması kökten çözüldü.
-- 💻 **Mac Ekran Yansıtma Tam Desteği:** mDNS TXT ve Plist kayıtlarında Screen Mirroring bayrağı (0x204 / 516) ve acl=0 tanımlandı; Mac'lerde AydTV'nin görünmesi sağlandı.
+- 🎬 **AirPlay Video Medya Oynatıcısı Entegrasyonu:** Telefondan (Safari, YouTube, Galeri, Dosyalar, Web, DLNA) video aktarıldığında TV ekranında tam ekran 1080p video oynatıcı devreye alındı. Kumanda ile Oynat/Duraklat (OK) ve 10sn İleri/Geri Sarma (D-Pad) kontrolleri sağlandı.
+- 🔇 **TV Yayını Sesi İzolasyonu & Donma Dedektörü Koruması:** Ekran veya video paylaşımı başladığında TV yayını tamamen susturularak durduruluyor. TV donma dedektörünün paylaşım esnasında TV yayınını "dondu" sanıp arkadan açması ("tekrar bağlanılıyor") ve TV sesini yayına karıştırması kökten engellendi.
+- ⚡ **RTSP Interleaved RTP (0x24) & İkili Veri Ayrıştırıcısı:** RTSP soketi üzerinden akan interleaved binary RTP paketleri güvenle ayrıştırıldı; soketin sonsuz döngüye girip kilitlenmesi önlendi.
 """
 
 # GitHub Token al

@@ -52,6 +52,8 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   String _castType = 'airplay';
   CastMediaInfo? _currentCastMedia;
   bool _showCastToast = false;
+  VideoPlayerController? _castVideoController;
+  bool _isCastVideoBuffering = false;
 
   // Eşzamanlılık / Yarış Durumu (Race Condition) Önleyici İstek Kimliği
   int _playRequestId = 0;
@@ -148,6 +150,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
 
     _castService.onDeviceDisconnected = () {
       if (!mounted) return;
+      _disposeCastVideo();
       setState(() {
         _isCasting = false;
         _currentCastMedia = null;
@@ -161,18 +164,24 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
 
     _castService.onMediaStarted = (media) {
       if (!mounted) return;
+      _stuckCounter = 0;
       setState(() {
         _isCasting = true;
         _isCastPlaying = true;
         _currentCastMedia = media;
       });
-      // Canlı TV yayınını duraklat ve sesini kes
+      // Canlı TV yayınını duraklat ve sesini tamamen kes
       _controller?.setVolume(0.0);
       _controller?.pause();
+
+      if (media.mediaType == 'video' && media.url.isNotEmpty) {
+        _initCastVideo(media.url);
+      }
     };
 
     _castService.onMediaStopped = () {
       if (!mounted) return;
+      _disposeCastVideo();
       setState(() {
         _isCasting = false;
         _currentCastMedia = null;
@@ -184,11 +193,13 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
 
     _castService.onMediaPaused = () {
       if (!mounted) return;
+      _castVideoController?.pause();
       setState(() => _isCastPlaying = false);
     };
 
     _castService.onMediaResumed = () {
       if (!mounted) return;
+      _castVideoController?.play();
       setState(() => _isCastPlaying = true);
     };
 
@@ -486,9 +497,39 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     });
   }
 
+  Future<void> _initCastVideo(String url) async {
+    try {
+      _disposeCastVideo();
+      final controller = VideoPlayerController.networkUrl(Uri.parse(url));
+      _castVideoController = controller;
+      await controller.initialize();
+      controller.play();
+      controller.addListener(() {
+        if (!mounted) return;
+        final isBuff = controller.value.isBuffering;
+        if (isBuff != _isCastVideoBuffering) {
+          setState(() => _isCastVideoBuffering = isBuff);
+        }
+      });
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('AirPlay video başlatma hatası: $e');
+    }
+  }
+
+  void _disposeCastVideo() {
+    try {
+      _castVideoController?.pause();
+      _castVideoController?.dispose();
+    } catch (_) {}
+    _castVideoController = null;
+    _isCastVideoBuffering = false;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _disposeCastVideo();
     _epgUpdateTimer?.cancel();
     _freezeCheckTimer?.cancel();
     _zappingBarTimer?.cancel();
@@ -868,11 +909,13 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
 
     _freezeCheckTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted ||
+          _isCasting ||
           _isAutoReconnecting ||
           _isLoading ||
           _hasError ||
           _controller == null ||
           _isDrawerOpen) {
+        if (_isCasting) _stuckCounter = 0;
         return;
       }
 
@@ -917,7 +960,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
 
   /// Donan yayını kullanıcı kanal değiştirip geri gelmiş gibi canlı uçtan (live-edge) tazeler
   Future<void> _recoverStalledPlayback() async {
-    if (_currentChannel == null || _isAutoReconnecting || !mounted) return;
+    if (_isCasting || _currentChannel == null || _isAutoReconnecting || !mounted) return;
 
     _lastRecoverAt = DateTime.now();
     _isAutoReconnecting = true;
@@ -1081,26 +1124,46 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
           key == LogicalKeyboardKey.mediaPlayPause ||
           key == LogicalKeyboardKey.mediaPlay ||
           key == LogicalKeyboardKey.mediaPause) {
-        if (_isCastPlaying) {
-          _castService.sendPause();
-          _showToast('⏸️ Duraklatıldı');
+        if (_castVideoController != null && _castVideoController!.value.isInitialized) {
+          if (_castVideoController!.value.isPlaying) {
+            _castVideoController!.pause();
+            _showToast('⏸️ Duraklatıldı');
+          } else {
+            _castVideoController!.play();
+            _showToast('▶️ Oynatılıyor');
+          }
         } else {
-          _castService.sendPlay();
-          _showToast('▶️ Oynatılıyor');
+          if (_isCastPlaying) {
+            _castService.sendPause();
+            _showToast('⏸️ Duraklatıldı');
+          } else {
+            _castService.sendPlay();
+            _showToast('▶️ Oynatılıyor');
+          }
         }
         return KeyEventResult.handled;
       }
 
       // 3. Sağ Tuş / İleri Sar: 10 sn İleri
       if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.mediaFastForward) {
-        _castService.sendSeek(10);
+        if (_castVideoController != null && _castVideoController!.value.isInitialized) {
+          final pos = _castVideoController!.value.position + const Duration(seconds: 10);
+          _castVideoController!.seekTo(pos);
+        } else {
+          _castService.sendSeek(10);
+        }
         _showToast('⏩ 10 sn İleri');
         return KeyEventResult.handled;
       }
 
       // 4. Sol Tuş / Geri Sar: 10 sn Geri
       if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
-        _castService.sendSeek(-10);
+        if (_castVideoController != null && _castVideoController!.value.isInitialized) {
+          final pos = _castVideoController!.value.position - const Duration(seconds: 10);
+          _castVideoController!.seekTo(pos < Duration.zero ? Duration.zero : pos);
+        } else {
+          _castService.sendSeek(-10);
+        }
         _showToast('⏪ 10 sn Geri');
         return KeyEventResult.handled;
       }
@@ -1488,6 +1551,57 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
                     const SizedBox(width: 8),
                     Text(
                       '📷 ${_connectedCastDevice ?? "AirPlay"}',
+                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_currentCastMedia?.mediaType == 'video' && _castVideoController != null) {
+      return Container(
+        color: Colors.black,
+        width: double.infinity,
+        height: double.infinity,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            if (_castVideoController!.value.isInitialized)
+              Center(
+                child: AspectRatio(
+                  aspectRatio: _castVideoController!.value.aspectRatio,
+                  child: VideoPlayer(_castVideoController!),
+                ),
+              )
+            else
+              const Center(
+                child: CircularProgressIndicator(color: TVTheme.focusCyan),
+              ),
+            if (_isCastVideoBuffering)
+              const Center(
+                child: CircularProgressIndicator(color: TVTheme.focusCyan),
+              ),
+            Positioned(
+              top: 24,
+              right: 28,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: TVTheme.focusCyan.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.play_circle_fill_rounded, color: TVTheme.focusCyan, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      '🎬 ${_connectedCastDevice ?? "AirPlay"}',
                       style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
                     ),
                   ],
