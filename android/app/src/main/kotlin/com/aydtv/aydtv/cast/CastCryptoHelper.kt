@@ -35,6 +35,18 @@ object CastCryptoHelper {
     val serverEd25519PublicKey: Ed25519PublicKeyParameters = serverEd25519PrivateKey.generatePublicKey()
     val serverEd25519PubBytes: ByteArray = serverEd25519PublicKey.encoded
 
+    init {
+        try {
+            System.loadLibrary("aydtv_crypto")
+            Log.i(TAG, "Native aydtv_crypto kütüphanesi başarıyla yüklendi.")
+        } catch (e: Throwable) {
+            Log.w(TAG, "Native aydtv_crypto kütüphanesi yüklenemedi: ${e.message}")
+        }
+    }
+
+    @JvmStatic
+    external fun decryptPlayFair(keymsg: ByteArray, ekey: ByteArray): ByteArray?
+
     // Canlı ekran (Type 110 H.264 stream) AES-CTR deşifreleme için ortak anahtarlar
     @Volatile
     var lastSharedSecret: ByteArray? = null
@@ -42,6 +54,8 @@ object CastCryptoHelper {
     var lastAesKey: ByteArray? = null
     @Volatile
     var lastEcdhSecret: ByteArray? = null
+    @Volatile
+    var lastFpKeymsg: ByteArray? = null
 
     fun saveKeysToDisk(context: android.content.Context) {
         try {
@@ -253,11 +267,65 @@ object CastCryptoHelper {
             val fpHeader = byteArrayOf(0x46, 0x50, 0x4c, 0x59, 0x03, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00, 0x14)
             System.arraycopy(fpHeader, 0, res, 0, 12)
             if (bodyBytes.size >= 164) {
+                lastFpKeymsg = bodyBytes.copyOf()
+                Log.i(TAG, "AirPlay FairPlay Phase 2 el sıkışma keymsg kaydedildi (164 bayt).")
                 System.arraycopy(bodyBytes, 144, res, 12, 20)
             } else {
                 for (i in 12 until 32) res[i] = ((i * 29 + 11) % 256).toByte()
             }
             res
         }
+    }
+
+    /**
+     * SETUP isteğindeki 72-bayt ekey ve streamConnectionId ile
+     * AirPlay Type 110 H.264 video deşifreleme anahtarını (AES key ve IV) türetir.
+     */
+    fun deriveMirrorStreamKeys(ekey: ByteArray, streamConnectionId: Long): Pair<ByteArray, ByteArray>? {
+        val keymsg = lastFpKeymsg
+        if (keymsg == null || keymsg.size < 164) {
+            Log.w(TAG, "deriveMirrorStreamKeys: lastFpKeymsg eksik veya geçersiz!")
+            return null
+        }
+        val rawAesKey = try {
+            decryptPlayFair(keymsg, ekey)
+        } catch (e: Throwable) {
+            Log.e(TAG, "decryptPlayFair native çağrısı başarısız oldu: ${e.message}")
+            null
+        }
+
+        if (rawAesKey == null || rawAesKey.size < 16) {
+            Log.w(TAG, "deriveMirrorStreamKeys: Playfair 16-baytlık AES anahtarı üretemedi!")
+            return null
+        }
+
+        // Eğer pairing (pair-verify) ile ecdhSecret üretildiyse SHA-512 ile hash'le
+        val ecdhSecret = lastEcdhSecret
+        val finalAesKey = if (ecdhSecret != null && ecdhSecret.size >= 32) {
+            val md = MessageDigest.getInstance("SHA-512")
+            md.update(rawAesKey, 0, 16)
+            md.update(ecdhSecret, 0, 32)
+            val digest = md.digest()
+            digest.copyOfRange(0, 16)
+        } else {
+            rawAesKey
+        }
+
+        // Video AES-128-CTR anahtar ve IV türetimi (UxPlay / RPiPlay standardı)
+        val skeyall = "AirPlayStreamKey$streamConnectionId".toByteArray(Charsets.UTF_8)
+        val sivall = "AirPlayStreamIV$streamConnectionId".toByteArray(Charsets.UTF_8)
+
+        val md = MessageDigest.getInstance("SHA-512")
+        md.update(skeyall)
+        md.update(finalAesKey, 0, 16)
+        val videoKey = md.digest().copyOfRange(0, 16)
+
+        md.reset()
+        md.update(sivall)
+        md.update(finalAesKey, 0, 16)
+        val videoIv = md.digest().copyOfRange(0, 16)
+
+        Log.i(TAG, "AirPlay mirror stream anahtarları başarıyla türetildi: streamId=$streamConnectionId")
+        return Pair(videoKey, videoIv)
     }
 }

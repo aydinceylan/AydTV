@@ -646,15 +646,58 @@ class CastServerManager(
                 notifyDeviceConnected(clientName, "airplay")
                 notifyMediaStarted("screen", "", "Ekran Yansıtma", clientName, deviceName)
 
-                // AirPlay AES-CTR deşifreleme motorunu el sıkışma anahtarlarıyla başlat
+                // AirPlay AES-CTR deşifreleme motorunu FairPlay ve stream anahtarlarıyla başlat
                 try {
-                    val streamId = path.substringAfterLast("/").toLongOrNull() ?: 1L
-                    val aesKey = CastCryptoHelper.lastAesKey
-                    val ecdhSecret = CastCryptoHelper.lastEcdhSecret ?: ByteArray(32)
-                    if (aesKey != null) {
-                        AirPlayMirrorDecoder.initAes(aesKey, ecdhSecret, streamId)
+                    var streamId = path.substringAfterLast("/").toLongOrNull() ?: 1L
+                    var ekeyBytes: ByteArray? = null
+
+                    if (bodyBytes.isNotEmpty()) {
+                        try {
+                            val plist = com.dd.plist.PropertyListParser.parse(bodyBytes) as? com.dd.plist.NSDictionary
+                            val ekeyData = plist?.objectForKey("ekey") as? com.dd.plist.NSData
+                            if (ekeyData != null) {
+                                ekeyBytes = ekeyData.bytes
+                                android.util.Log.i("CastServer", "SETUP isteğinde 72-bayt ekey başarıyla ayrıştırıldı.")
+                            }
+                            val streams = plist?.objectForKey("streams") as? com.dd.plist.NSArray
+                            if (streams != null && streams.count() > 0) {
+                                val sDict = streams.array[0] as? com.dd.plist.NSDictionary
+                                val sIdObj = sDict?.objectForKey("streamConnectionID")
+                                if (sIdObj != null) {
+                                    val parsedId = sIdObj.toString().toLongOrNull()
+                                    if (parsedId != null && parsedId != 0L) {
+                                        streamId = parsedId
+                                    }
+                                }
+                            }
+                        } catch (pe: Throwable) {
+                            android.util.Log.w("CastServer", "SETUP body plist parse hatası: ${pe.message}")
+                        }
                     }
-                } catch (_: Exception) {}
+
+                    // FairPlay SAP ile gerçek video AES key ve IV türetimi
+                    if (ekeyBytes != null) {
+                        val derivedKeys = CastCryptoHelper.deriveMirrorStreamKeys(ekeyBytes, streamId)
+                        if (derivedKeys != null) {
+                            AirPlayMirrorDecoder.initAesDirect(derivedKeys.first, derivedKeys.second)
+                            android.util.Log.i("CastServer", "FairPlay SAP v3 video deşifre motoru tam başarıyla başlatıldı (streamId=$streamId).")
+                        } else {
+                            val aesKey = CastCryptoHelper.lastAesKey
+                            val ecdhSecret = CastCryptoHelper.lastEcdhSecret ?: ByteArray(32)
+                            if (aesKey != null) {
+                                AirPlayMirrorDecoder.initAes(aesKey, ecdhSecret, streamId)
+                            }
+                        }
+                    } else {
+                        val aesKey = CastCryptoHelper.lastAesKey
+                        val ecdhSecret = CastCryptoHelper.lastEcdhSecret ?: ByteArray(32)
+                        if (aesKey != null) {
+                            AirPlayMirrorDecoder.initAes(aesKey, ecdhSecret, streamId)
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("CastServer", "SETUP AES init hatası: ${e.message}")
+                }
 
                 val transport = headers["transport"] ?: "RTP/AVP/TCP;unicast;interleaved=0-1;mode=record"
                 val setupXml = """<?xml version="1.0" encoding="UTF-8"?>

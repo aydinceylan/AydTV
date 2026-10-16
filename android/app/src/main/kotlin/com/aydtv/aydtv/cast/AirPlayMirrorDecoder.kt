@@ -62,6 +62,25 @@ object AirPlayMirrorDecoder {
     }
 
     /**
+     * Doğrudan hesaplanmış AES key ve IV ile deşifreleme motorunu başlatır.
+     */
+    fun initAesDirect(key: ByteArray, iv: ByteArray) {
+        synchronized(this) {
+            try {
+                val cipher = Cipher.getInstance("AES/CTR/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
+                aesCipher = cipher
+                nextDecryptCount = 0
+                java.util.Arrays.fill(ogBuffer, 0.toByte())
+                Log.i(TAG, "AirPlay AES-CTR deşifreleme motoru doğrudan anahtarlarla başarıyla ilklendirildi.")
+            } catch (e: Exception) {
+                Log.w(TAG, "initAesDirect hatası: ${e.message}")
+                aesCipher = null
+            }
+        }
+    }
+
+    /**
      * AirPlay AES-CTR deşifreleme oturumunu ilklendirir (RPiPlay standardı).
      */
     fun initAes(aesKey: ByteArray, ecdhSecret: ByteArray, streamConnectionId: Long = 1L) {
@@ -94,6 +113,7 @@ object AirPlayMirrorDecoder {
                 cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(decryptKey, "AES"), IvParameterSpec(decryptIv))
                 aesCipher = cipher
                 nextDecryptCount = 0
+                java.util.Arrays.fill(ogBuffer, 0.toByte())
                 Log.i(TAG, "AirPlay AES-CTR deşifreleme motoru başarıyla ilklendirildi (streamId=$streamConnectionId).")
             } catch (e: Exception) {
                 Log.w(TAG, "initAes hatası: ${e.message}")
@@ -240,21 +260,48 @@ object AirPlayMirrorDecoder {
         val cipher = aesCipher ?: return payload
         return try {
             val decrypted = ByteArray(payload.size)
-            // Blok hizalı AES-CTR çözme
-            val blocksToDecrypt = (payload.size / 16) * 16
-            if (blocksToDecrypt > 0) {
-                val blockDecrypted = cipher.update(payload, 0, blocksToDecrypt)
-                if (blockDecrypted != null) {
-                    System.arraycopy(blockDecrypted, 0, decrypted, 0, blockDecrypted.size)
+            var offset = 0
+
+            // 1. Önceki paketten kalan artık keystream varsa XOR'la (UxPlay standardı)
+            if (nextDecryptCount > 0) {
+                val count = minOf(nextDecryptCount, payload.size)
+                val ogStart = 16 - nextDecryptCount
+                for (i in 0 until count) {
+                    decrypted[i] = (payload[i].toInt() xor ogBuffer[ogStart + i].toInt()).toByte()
                 }
+                offset = count
+                nextDecryptCount -= count
             }
-            // Kalan baytları kopyala
-            val rem = payload.size - blocksToDecrypt
-            if (rem > 0) {
-                System.arraycopy(payload, blocksToDecrypt, decrypted, blocksToDecrypt, rem)
+
+            // 2. Kalan verideki tam 16 baytlık blokları çöz
+            val remaining = payload.size - offset
+            val blocksToDecrypt = (remaining / 16) * 16
+            if (blocksToDecrypt > 0) {
+                val blockDecrypted = cipher.update(payload, offset, blocksToDecrypt)
+                if (blockDecrypted != null) {
+                    System.arraycopy(blockDecrypted, 0, decrypted, offset, blockDecrypted.size)
+                }
+                offset += blocksToDecrypt
             }
+
+            // 3. 16'ya bölünmeyen artık baytları işle (restlen)
+            val restLen = payload.size - offset
+            if (restLen > 0) {
+                java.util.Arrays.fill(ogBuffer, 0.toByte())
+                System.arraycopy(payload, offset, ogBuffer, 0, restLen)
+                val decryptedOg = cipher.update(ogBuffer)
+                if (decryptedOg != null) {
+                    System.arraycopy(decryptedOg, 0, ogBuffer, 0, 16)
+                }
+                for (j in 0 until restLen) {
+                    decrypted[offset + j] = ogBuffer[j]
+                }
+                nextDecryptCount = 16 - restLen
+            }
+
             decrypted
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "AirPlay video deşifreleme hatası: ${e.message}")
             payload
         }
     }
