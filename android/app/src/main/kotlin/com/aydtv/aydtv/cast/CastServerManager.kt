@@ -272,18 +272,6 @@ class CastServerManager(
                 setAttribute("pi", "b08f5a79-db29-4384-b456-a4784d9e6055")
             }
 
-            try {
-                val inetAddr = InetAddress.getByName(localIp)
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    airplayService.setHostAddresses(listOf(inetAddr))
-                } else {
-                    @Suppress("DEPRECATION")
-                    airplayService.host = inetAddr
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("CastServer", "Failed to set host address on airplay service: ${e.message}")
-            }
-
             val airplayListener = object : NsdManager.RegistrationListener {
                 override fun onServiceRegistered(serviceInfo: NsdServiceInfo?) {
                     android.util.Log.i("CastServer", "AirPlay mDNS registered successfully: ${serviceInfo?.serviceName}")
@@ -316,18 +304,7 @@ class CastServerManager(
                 setAttribute("sf", "0x4")
                 setAttribute("pw", pwStr)
                 setAttribute("features", featuresHex)
-            }
-
-            try {
-                val inetAddr = InetAddress.getByName(localIp)
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    raopService.setHostAddresses(listOf(inetAddr))
-                } else {
-                    @Suppress("DEPRECATION")
-                    raopService.host = inetAddr
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("CastServer", "Failed to set host address on raop service: ${e.message}")
+                setAttribute("pk", CastCryptoHelper.getPublicKeyHex())
             }
 
             val raopListener = object : NsdManager.RegistrationListener {
@@ -559,8 +536,26 @@ class CastServerManager(
                 hidePin()
                 notifyMediaStarted("screen", "", "Ekran Yansıtma", clientName, deviceName)
                 val transport = headers["transport"] ?: "RTP/AVP/TCP;unicast;interleaved=0-1;mode=record"
+                val setupXml = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>eventPort</key><integer>7000</integer>
+	<key>timingPort</key><integer>7000</integer>
+	<key>streams</key>
+	<array>
+		<dict>
+			<key>dataPort</key><integer>7000</integer>
+			<key>type</key><integer>110</integer>
+		</dict>
+	</array>
+</dict>
+</plist>"""
+                val plistBytes = setupXml.toByteArray(Charsets.UTF_8)
                 sendRtspResponse(
                     output, 200, "OK", cseq,
+                    contentType = "text/x-apple-plist+xml",
+                    body = plistBytes,
                     extraHeaders = mapOf(
                         "Transport" to transport,
                         "Session" to "1",
