@@ -60,7 +60,16 @@ class CastServerManager(
     }
 
     fun start(customName: String = "AydTV", isPinRequired: Boolean = false) {
-        if (isRunning) return
+        if (isRunning) {
+            val needMdnsUpdate = (pinEnabled != isPinRequired) || (deviceName != customName)
+            deviceName = customName
+            pinEnabled = isPinRequired
+            if (needMdnsUpdate) {
+                unregisterMdnsServices()
+                registerMdnsServices()
+            }
+            return
+        }
         isRunning = true
         deviceName = customName
         pinEnabled = isPinRequired
@@ -158,8 +167,12 @@ class CastServerManager(
         return "93:8D:98:6C:3F:65"
     }
 
+    private fun getAirplayFeatures(): Long = if (pinEnabled) 1518338007L else 1384120311L
+    private fun getAirplayFeaturesHex(): String = if (pinEnabled) "0x5A7FFFF7,0x0" else "0x527FFFF7,0x0"
+
     private fun getAirplayPlistXml(): String {
         val mac = getMacAddress()
+        val feats = getAirplayFeatures()
         return """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -171,12 +184,12 @@ class CastServerManager(
 	<key>sourceVersion</key><string>220.68</string>
 	<key>protovers</key><string>1.1</string>
 	<key>statusFlags</key><integer>4</integer>
-	<key>features</key><integer>1384120311</integer>
+	<key>features</key><integer>$feats</integer>
 	<key>vv</key><integer>2</integer>
 	<key>keepAliveLowPower</key><integer>1</integer>
 	<key>keepAliveSendStatsAsBody</key><integer>1</integer>
 	<key>pi</key><string>b08f5a79-db29-4384-b456-a4784d9e6055</string>
-	<key>pk</key><data>XYMxJlYMsZoUGTcneJbw/UN7poAeshCsTDnZAHLXDag=</data>
+	<key>pk</key><data>eXVhfKVVHelAHq9VbKzlgjRc4moreb6qFa1FuzIspxI=</data>
 	<key>displays</key>
 	<array>
 		<dict>
@@ -215,20 +228,22 @@ class CastServerManager(
             val mac = getMacAddress()
             val macNoColon = mac.replace(":", "")
             val localIp = getLocalIpAddress()
+            val featuresHex = getAirplayFeaturesHex()
+            val pwStr = if (pinEnabled) "true" else "false"
 
-            // 1. Evrensel Standart AirPlay Servisi (Bit 27 OFF: Şifresiz ve Doğrudan Yansıtma)
+            // 1. Evrensel Standart AirPlay Servisi (mDNS ve Plist ile %100 senkronize PK ve Features)
             val airplayService = NsdServiceInfo().apply {
                 serviceName = deviceName
                 serviceType = "_airplay._tcp"
                 port = AIRPLAY_PORT
                 setAttribute("deviceid", mac)
-                setAttribute("features", "0x527FFFF7,0x0")
+                setAttribute("features", featuresHex)
                 setAttribute("model", "AppleTV3,2")
                 setAttribute("srcvers", "220.68")
                 setAttribute("protovers", "1.1")
                 setAttribute("flags", "0x4")
                 setAttribute("vv", "2")
-                setAttribute("pw", "false")
+                setAttribute("pw", pwStr)
                 setAttribute("pk", "7975617ca5551de9401eaf556cace582345ce26a2b79beaa15ad45bb322ca712")
                 setAttribute("pi", "b08f5a79-db29-4384-b456-a4784d9e6055")
             }
@@ -275,8 +290,8 @@ class CastServerManager(
                 setAttribute("am", "AppleTV3,2")
                 setAttribute("vs", "220.68")
                 setAttribute("sf", "0x4")
-                setAttribute("pw", "false")
-                setAttribute("features", "0x527FFFF7,0x0")
+                setAttribute("pw", pwStr)
+                setAttribute("features", featuresHex)
             }
 
             try {
@@ -643,6 +658,10 @@ class CastServerManager(
             }
             path.startsWith("/stop") -> {
                 notifyMediaStopped()
+                sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
+            }
+            path.startsWith("/stream") -> {
+                notifyMediaStarted("screen", "", "Ekran Yansıtma", clientName, deviceName)
                 sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
             }
             else -> {

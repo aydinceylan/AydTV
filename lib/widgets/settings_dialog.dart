@@ -357,6 +357,18 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
           // Tampon Modu
           Focus(
+            onKeyEvent: (node, event) {
+              if (event is KeyDownEvent) {
+                final key = event.logicalKey;
+                if (key == LogicalKeyboardKey.select ||
+                    key == LogicalKeyboardKey.enter ||
+                    key == LogicalKeyboardKey.space) {
+                  _cycleBufferMode();
+                  return KeyEventResult.handled;
+                }
+              }
+              return KeyEventResult.ignored;
+            },
             child: Builder(
               builder: (context) {
                 final isFocused = Focus.of(context).hasFocus;
@@ -365,9 +377,12 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   child: Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: isFocused ? TVTheme.focusCyan.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.04),
+                      color: isFocused ? TVTheme.focusCyan.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.04),
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: isFocused ? TVTheme.focusCyan : Colors.white12),
+                      border: Border.all(
+                        color: isFocused ? TVTheme.focusCyan : Colors.white12,
+                        width: isFocused ? 2.0 : 1.0,
+                      ),
                     ),
                     child: Row(
                       children: [
@@ -759,6 +774,23 @@ class _SettingsDialogState extends State<SettingsDialog> {
           children: options.map((m) {
             final isSelected = (m == 0 && !_sleepService.isActive) || (m > 0 && activeMinutes == m);
             return Focus(
+              onKeyEvent: (node, event) {
+                if (event is KeyDownEvent) {
+                  final key = event.logicalKey;
+                  if (key == LogicalKeyboardKey.select ||
+                      key == LogicalKeyboardKey.enter ||
+                      key == LogicalKeyboardKey.space) {
+                    if (m == 0) {
+                      _sleepService.cancelTimer();
+                    } else {
+                      _sleepService.startTimer(m);
+                    }
+                    setState(() {});
+                    return KeyEventResult.handled;
+                  }
+                }
+                return KeyEventResult.ignored;
+              },
               child: Builder(
                 builder: (context) {
                   final isFocused = Focus.of(context).hasFocus;
@@ -812,6 +844,19 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
         // TV Tuşunu AydTV'ye Ata
         Focus(
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent) {
+              final key = event.logicalKey;
+              if (key == LogicalKeyboardKey.select ||
+                  key == LogicalKeyboardKey.enter ||
+                  key == LogicalKeyboardKey.space) {
+                Navigator.of(context).pop();
+                DefaultTvDialog.show(context);
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
           child: Builder(
             builder: (context) {
               final isFocused = Focus.of(context).hasFocus;
@@ -823,9 +868,12 @@ class _SettingsDialogState extends State<SettingsDialog> {
                 child: Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: isFocused ? TVTheme.focusCyan.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.04),
+                    color: isFocused ? TVTheme.focusCyan.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: isFocused ? TVTheme.focusCyan : Colors.white12),
+                    border: Border.all(
+                      color: isFocused ? TVTheme.focusCyan : Colors.white12,
+                      width: isFocused ? 2.0 : 1.0,
+                    ),
                   ),
                   child: Row(
                     children: [
@@ -853,6 +901,19 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
         // Güncellemeleri Denetle
         Focus(
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent) {
+              final key = event.logicalKey;
+              if (key == LogicalKeyboardKey.select ||
+                  key == LogicalKeyboardKey.enter ||
+                  key == LogicalKeyboardKey.space) {
+                Navigator.of(context).pop();
+                widget.onCheckUpdate?.call();
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
           child: Builder(
             builder: (context) {
               final isFocused = Focus.of(context).hasFocus;
@@ -864,9 +925,12 @@ class _SettingsDialogState extends State<SettingsDialog> {
                 child: Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: isFocused ? TVTheme.focusCyan.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.04),
+                    color: isFocused ? TVTheme.focusCyan.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: isFocused ? TVTheme.focusCyan : Colors.white12),
+                    border: Border.all(
+                      color: isFocused ? TVTheme.focusCyan : Colors.white12,
+                      width: isFocused ? 2.0 : 1.0,
+                    ),
                   ),
                   child: Row(
                     children: [
@@ -911,37 +975,63 @@ class _SettingsDialogState extends State<SettingsDialog> {
     required ValueChanged<bool> onChanged,
   }) {
     return Focus(
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          final key = event.logicalKey;
+          if (key == LogicalKeyboardKey.select ||
+              key == LogicalKeyboardKey.enter ||
+              key == LogicalKeyboardKey.space) {
+            onChanged(!value);
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
       child: Builder(
         builder: (context) {
           final isFocused = Focus.of(context).hasFocus;
-          return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: isFocused ? TVTheme.focusCyan.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.04),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: isFocused ? TVTheme.focusCyan : Colors.white12),
-            ),
-            child: Row(
-              children: [
-                Icon(icon, color: isFocused ? TVTheme.focusCyan : Colors.white70, size: 24),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title, style: TextStyle(color: isFocused ? Colors.white : Colors.white.withValues(alpha: 0.9), fontWeight: FontWeight.w600, fontSize: 14)),
-                      const SizedBox(height: 2),
-                      Text(subtitle, style: TextStyle(color: TVTheme.textSecondary.withValues(alpha: 0.8), fontSize: 12)),
-                    ],
+          return InkWell(
+            onTap: () => onChanged(!value),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: isFocused ? TVTheme.focusCyan.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isFocused ? TVTheme.focusCyan : Colors.white12,
+                  width: isFocused ? 2.0 : 1.0,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(icon, color: isFocused ? TVTheme.focusCyan : Colors.white70, size: 24),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            color: isFocused ? Colors.white : Colors.white.withValues(alpha: 0.9),
+                            fontWeight: isFocused ? FontWeight.bold : FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(subtitle, style: TextStyle(color: TVTheme.textSecondary.withValues(alpha: 0.8), fontSize: 12)),
+                      ],
+                    ),
                   ),
-                ),
-                Switch(
-                  value: value,
-                  activeThumbColor: TVTheme.focusCyan,
-                  activeTrackColor: TVTheme.focusCyan.withValues(alpha: 0.5),
-                  onChanged: (newVal) => onChanged(newVal),
-                ),
-              ],
+                  Switch(
+                    value: value,
+                    activeThumbColor: TVTheme.focusCyan,
+                    activeTrackColor: TVTheme.focusCyan.withValues(alpha: 0.5),
+                    onChanged: (newVal) => onChanged(newVal),
+                  ),
+                ],
+              ),
             ),
           );
         },
