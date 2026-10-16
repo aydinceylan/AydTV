@@ -42,6 +42,12 @@ class CastServerManager(
     private var isDisplayingPhoto = false
     private val cachedPhotos = mutableMapOf<String, File>()
 
+    init {
+        try {
+            CastCryptoHelper.loadKeysFromDisk(context)
+        } catch (_: Exception) {}
+    }
+
     fun showPin(clientName: String) {
         if (activePinCode == null) {
             activePinCode = String.format("%04d", (1000..9999).random())
@@ -624,7 +630,7 @@ class CastServerManager(
             method == "POST" && path.startsWith("/pair-verify") -> {
                 val isStep1 = bodyBytes.isNotEmpty() && bodyBytes[0].toInt() == 1
                 if (isStep1) {
-                    val verifyResp = CastCryptoHelper.handlePairVerifyStep1(bodyBytes)
+                    val verifyResp = CastCryptoHelper.handlePairVerifyStep1(bodyBytes, context)
                     sendRtspResponse(output, 200, "OK", cseq, "application/octet-stream", verifyResp)
                 } else {
                     hidePin()
@@ -2299,7 +2305,8 @@ class CastServerManager(
       }
       try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-          showToast('Tarayıcınız ekran paylaşımını desteklemiyor');
+          showToast('iPhone ekranı için Denetim Merkezi > Ekran Yansıtma seçin');
+          alert('📱 iPhone Ekran Yansıtma Rehberi:\n\nApple iOS Safari güvenlik kuralı nedeniyle tarayıcıdan ekran kaydına izin vermez.\n\nTelefonunuzun canlı ekranını televizyona yansıtmak için:\n1. iPhone ekranının sağ üst köşesinden aşağı kaydırıp Denetim Merkezi\'ni açın.\n2. İki ekran şeklindeki [Ekran Yansıtma] simgesine dokunun.\n3. Listeden [AydTV] seçin.\n\nFotoğraflarınızı ise aşağıdaki "Galeriden Fotoğraf Seç & Yansıt" butonuyla doğrudan televizyonda tam ekran açabilirsiniz.');
           return;
         }
         showToast('Ekran paylaşımı izni bekleniyor...');

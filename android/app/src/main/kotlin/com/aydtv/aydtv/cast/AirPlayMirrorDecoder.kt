@@ -135,8 +135,8 @@ object AirPlayMirrorDecoder {
                             onMirrorStateListener?.invoke(true, flutterTextureId, w, h)
                         }
                     }
-                    0 -> {
-                        // Video Frame Paketi (H.264 slice)
+                    0, 5 -> {
+                        // Video Frame Paketi (0: VCL slice, 5: IDR Keyframe)
                         if (payload.isEmpty()) return
 
                         // Codec hazır değilse başlatmayı dene
@@ -146,19 +146,37 @@ object AirPlayMirrorDecoder {
 
                         val c = mediaCodec ?: return
 
-                        // AES-CTR deşifreleme uygula (gerekliyse)
-                        val decryptedPayload = decryptPacketIfNeeded(payload)
+                        // Akıllı H.264 şifreleme kontrolü
+                        val finalPayload: ByteArray
+                        if (isPlainH264Avcc(payload)) {
+                            // Paket şifresiz ham H.264 verisi
+                            finalPayload = payload
+                        } else {
+                            // Paket şifreli, AES-CTR ile deşifre etmeyi dene
+                            val decrypted = decryptPacketIfNeeded(payload)
+                            if (isPlainH264Avcc(decrypted)) {
+                                finalPayload = decrypted
+                            } else {
+                                // Deşifre anahtarı henüz eşleşmemiş veya bozuk paket;
+                                // Bozuk veriyi MediaCodec'e basıp yeşil/mor glitch oluşturmak yerine atla
+                                return
+                            }
+                        }
 
-                        // AVCC to Annex-B dönüşümü
-                        val frameAnnexB = convertAvccToAnnexB(decryptedPayload)
+                        // AVCC to Annex-B dönüşümü (Zaten Annex-B değilse)
+                        val frameAnnexB = if (isAlreadyAnnexB(finalPayload)) {
+                            finalPayload
+                        } else {
+                            convertAvccToAnnexB(finalPayload)
+                        }
 
-                        // İlk karede veya SPS/PPS henüz beslenmediyse, SPS/PPS'i IDR karesinin önüne ekle
-                        val finalFrame = if (!hasFeedKeyframe && cachedSpsPps != null) {
+                        // IDR ana karesinde veya ilk karede SPS/PPS'i NAL karesinin önüne ekle
+                        val isIdr = (pType == 5) || isIdrNalu(frameAnnexB)
+                        val finalFrame = if ((!hasFeedKeyframe || isIdr) && cachedSpsPps != null) {
                             val combined = ByteArray(cachedSpsPps!!.size + frameAnnexB.size)
                             System.arraycopy(cachedSpsPps!!, 0, combined, 0, cachedSpsPps!!.size)
                             System.arraycopy(frameAnnexB, 0, combined, cachedSpsPps!!.size, frameAnnexB.size)
                             hasFeedKeyframe = true
-                            Log.i(TAG, "Prepended SPS/PPS to first keyframe (total ${combined.size} bytes)")
                             combined
                         } else {
                             frameAnnexB
@@ -181,6 +199,41 @@ object AirPlayMirrorDecoder {
                 Log.e(TAG, "Error in feedPacket: ${e.message}")
             }
         }
+    }
+
+    /**
+     * H.264 AVCC formatındaki verinin şifresiz ve geçerli olup olmadığını doğrular.
+     * H.264 standardına göre ilk NAL byte'ının en yüksek biti (bit 7) forbidden_zero_bit olup daima 0'dır.
+     */
+    private fun isPlainH264Avcc(data: ByteArray): Boolean {
+        if (data.size < 5) return false
+        val naluLen = ((data[0].toInt() and 0xFF) shl 24) or
+                      ((data[1].toInt() and 0xFF) shl 16) or
+                      ((data[2].toInt() and 0xFF) shl 8) or
+                      (data[3].toInt() and 0xFF)
+        if (naluLen in 1..(data.size - 4)) {
+            val header = data[4].toInt() and 0xFF
+            val forbidden = header and 0x80
+            val type = header and 0x1F
+            return (forbidden == 0 && type in 1..23)
+        }
+        return false
+    }
+
+    private fun isAlreadyAnnexB(data: ByteArray): Boolean {
+        if (data.size < 4) return false
+        return (data[0] == 0.toByte() && data[1] == 0.toByte() && data[2] == 0.toByte() && data[3] == 1.toByte()) ||
+               (data[0] == 0.toByte() && data[1] == 0.toByte() && data[2] == 1.toByte())
+    }
+
+    private fun isIdrNalu(data: ByteArray): Boolean {
+        for (i in 0 until minOf(data.size - 4, 32)) {
+            if (data[i] == 0.toByte() && data[i + 1] == 0.toByte() && data[i + 2] == 0.toByte() && data[i + 3] == 1.toByte()) {
+                val nalType = data[i + 4].toInt() and 0x1F
+                if (nalType == 5) return true
+            }
+        }
+        return false
     }
 
     private fun decryptPacketIfNeeded(payload: ByteArray): ByteArray {

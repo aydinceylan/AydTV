@@ -43,6 +43,34 @@ object CastCryptoHelper {
     @Volatile
     var lastEcdhSecret: ByteArray? = null
 
+    fun saveKeysToDisk(context: android.content.Context) {
+        try {
+            val prefs = context.getSharedPreferences("airplay_crypto", android.content.Context.MODE_PRIVATE)
+            prefs.edit().apply {
+                lastSharedSecret?.let { putString("shared_secret", Base64.encodeToString(it, Base64.NO_WRAP)) }
+                lastAesKey?.let { putString("aes_key", Base64.encodeToString(it, Base64.NO_WRAP)) }
+                lastEcdhSecret?.let { putString("ecdh_secret", Base64.encodeToString(it, Base64.NO_WRAP)) }
+                apply()
+            }
+            Log.i(TAG, "AirPlay kripto anahtarları diske kalıcı kaydedildi.")
+        } catch (_: Exception) {}
+    }
+
+    fun loadKeysFromDisk(context: android.content.Context) {
+        try {
+            val prefs = context.getSharedPreferences("airplay_crypto", android.content.Context.MODE_PRIVATE)
+            val ss = prefs.getString("shared_secret", null)
+            val ak = prefs.getString("aes_key", null)
+            val es = prefs.getString("ecdh_secret", null)
+            if (ss != null) lastSharedSecret = Base64.decode(ss, Base64.NO_WRAP)
+            if (ak != null) lastAesKey = Base64.decode(ak, Base64.NO_WRAP)
+            if (es != null) lastEcdhSecret = Base64.decode(es, Base64.NO_WRAP)
+            if (lastAesKey != null) {
+                Log.i(TAG, "AirPlay kripto anahtarları diskten başarıyla yüklendi.")
+            }
+        } catch (_: Exception) {}
+    }
+
     /**
      * mDNS TXT kaydında kullanılan 32-baytlık public key hex string
      */
@@ -62,7 +90,7 @@ object CastCryptoHelper {
      * İstemciden gelen Curve25519 public key ile shared secret üretir,
      * Ed25519 ile imzalar ve AES-128-CTR ile şifreleyip 96-baytlık yanıt döner.
      */
-    fun handlePairVerifyStep1(clientPayload: ByteArray): ByteArray {
+    fun handlePairVerifyStep1(clientPayload: ByteArray, context: android.content.Context? = null): ByteArray {
         try {
             val clientEcdhPubBytes: ByteArray
             if (clientPayload.size >= 68 && clientPayload[0].toInt() == 1) {
@@ -127,6 +155,7 @@ object CastCryptoHelper {
             lastSharedSecret = sharedSecret
             lastAesKey = aesKey
             lastEcdhSecret = clientEcdhPubBytes
+            context?.let { saveKeysToDisk(it) }
 
             Log.i(TAG, "Pair-Verify Step 1 kriptografik el sıkışma başarıyla tamamlandı (96 bayt).")
             return verifyResp
