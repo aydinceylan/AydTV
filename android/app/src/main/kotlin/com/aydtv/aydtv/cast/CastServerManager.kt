@@ -6,6 +6,7 @@ import android.media.AudioManager
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import io.flutter.plugin.common.MethodChannel
@@ -197,6 +198,7 @@ class CastServerManager(
     private fun getAirplayPlistXml(): String {
         val mac = getMacAddress()
         val feats = getAirplayFeatures()
+        val status = if (pinEnabled) 68 else 4
         return """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -204,10 +206,10 @@ class CastServerManager(
 	<key>name</key><string>$deviceName</string>
 	<key>deviceID</key><string>$mac</string>
 	<key>macAddress</key><string>$mac</string>
-	<key>model</key><string>AppleTV3,2</string>
-	<key>sourceVersion</key><string>220.68</string>
+	<key>model</key><string>AppleTV5,3</string>
+	<key>sourceVersion</key><string>377.17.24.4</string>
 	<key>protovers</key><string>1.1</string>
-	<key>statusFlags</key><integer>68</integer>
+	<key>statusFlags</key><integer>$status</integer>
 	<key>features</key><integer>$feats</integer>
 	<key>vv</key><integer>2</integer>
 	<key>keepAliveLowPower</key><integer>1</integer>
@@ -253,23 +255,29 @@ class CastServerManager(
             val macNoColon = mac.replace(":", "")
             val localIp = getLocalIpAddress()
             val featuresHex = getAirplayFeaturesHex()
+            val flagsStr = if (pinEnabled) "0x44" else "0x4"
             val pwStr = if (pinEnabled) "true" else "false"
 
-            // 1. Evrensel Standart AirPlay Servisi (mDNS ve Plist ile %100 senkronize PK ve Features)
+            // 1. Evrensel Standart AirPlay Servisi (AppleTV5,3 - Mac & iOS 14/15/16/17/18 Uyumlu)
             val airplayService = NsdServiceInfo().apply {
                 serviceName = deviceName
                 serviceType = "_airplay._tcp"
                 port = AIRPLAY_PORT
                 setAttribute("deviceid", mac)
                 setAttribute("features", featuresHex)
-                setAttribute("model", "AppleTV3,2")
-                setAttribute("srcvers", "220.68")
+                setAttribute("model", "AppleTV5,3")
+                setAttribute("srcvers", "377.17.24.4")
                 setAttribute("protovers", "1.1")
-                setAttribute("flags", "0x44")
+                setAttribute("flags", flagsStr)
                 setAttribute("vv", "2")
                 setAttribute("pw", pwStr)
                 setAttribute("pk", CastCryptoHelper.getPublicKeyHex())
                 setAttribute("pi", "b08f5a79-db29-4384-b456-a4784d9e6055")
+                if (Build.VERSION.SDK_INT >= 34) {
+                    try {
+                        setHostAddresses(listOf(InetAddress.getByName(localIp)))
+                    } catch (_: Throwable) {}
+                }
             }
 
             val airplayListener = object : NsdManager.RegistrationListener {
@@ -299,12 +307,17 @@ class CastServerManager(
                 setAttribute("vn", "65537")
                 setAttribute("da", "true")
                 setAttribute("md", "0,1,2")
-                setAttribute("am", "AppleTV3,2")
-                setAttribute("vs", "220.68")
-                setAttribute("sf", "0x4")
+                setAttribute("am", "AppleTV5,3")
+                setAttribute("vs", "377.17.24.4")
+                setAttribute("sf", flagsStr)
                 setAttribute("pw", pwStr)
                 setAttribute("features", featuresHex)
                 setAttribute("pk", CastCryptoHelper.getPublicKeyHex())
+                if (Build.VERSION.SDK_INT >= 34) {
+                    try {
+                        setHostAddresses(listOf(InetAddress.getByName(localIp)))
+                    } catch (_: Throwable) {}
+                }
             }
 
             val raopListener = object : NsdManager.RegistrationListener {
@@ -447,7 +460,6 @@ class CastServerManager(
 
                 if (!deviceDetected) {
                     deviceDetected = true
-                    notifyDeviceConnected(clientName, "airplay")
                 }
 
                 val cseq = headers["cseq"] ?: "0"
@@ -534,6 +546,7 @@ class CastServerManager(
             }
             method == "SETUP" -> {
                 hidePin()
+                notifyDeviceConnected(clientName, "airplay")
                 notifyMediaStarted("screen", "", "Ekran Yansıtma", clientName, deviceName)
                 val transport = headers["transport"] ?: "RTP/AVP/TCP;unicast;interleaved=0-1;mode=record"
                 val setupXml = """<?xml version="1.0" encoding="UTF-8"?>
@@ -636,6 +649,7 @@ class CastServerManager(
             }
             path.startsWith("/play") -> {
                 hidePin()
+                notifyDeviceConnected(clientName, "airplay")
                 var streamUrl = headers["content-location"] ?: ""
                 if (streamUrl.isBlank()) {
                     if (bodyStr.contains("<key>Content-Location</key>")) {
@@ -657,6 +671,7 @@ class CastServerManager(
                 try {
                     val photoFile = File(context.cacheDir, "airplay_photo.jpg")
                     photoFile.writeBytes(bodyBytes)
+                    notifyDeviceConnected(clientName, "airplay")
                     notifyMediaStarted("photo", photoFile.absolutePath, "AirPlay Fotoğrafı", clientName, deviceName)
                 } catch (_: Exception) {}
                 sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
@@ -700,7 +715,7 @@ class CastServerManager(
         val bytes = body.toByteArray(Charsets.UTF_8)
         val sb = StringBuilder()
         sb.append("HTTP/1.1 $code $status\r\n")
-        sb.append("Server: AirTunes/220.68\r\n")
+        sb.append("Server: AirTunes/377.17.24.4\r\n")
         sb.append("Content-Type: $contentType\r\n")
         sb.append("Content-Length: ${bytes.size}\r\n")
         sb.append("Access-Control-Allow-Origin: *\r\n")
@@ -725,7 +740,7 @@ class CastServerManager(
     ) {
         val sb = StringBuilder()
         sb.append("HTTP/1.1 $code $status\r\n")
-        sb.append("Server: AirTunes/220.68\r\n")
+        sb.append("Server: AirTunes/377.17.24.4\r\n")
         sb.append("Content-Type: $contentType\r\n")
         sb.append("Content-Length: ${body.size}\r\n")
         sb.append("Access-Control-Allow-Origin: *\r\n")
@@ -754,7 +769,7 @@ class CastServerManager(
         val sb = StringBuilder()
         sb.append("RTSP/1.0 $code $status\r\n")
         sb.append("CSeq: $cseq\r\n")
-        sb.append("Server: AirTunes/220.68\r\n")
+        sb.append("Server: AirTunes/377.17.24.4\r\n")
         extraHeaders?.forEach { (k, v) -> sb.append("$k: $v\r\n") }
         if (contentType != null) {
             sb.append("Content-Type: $contentType\r\n")
