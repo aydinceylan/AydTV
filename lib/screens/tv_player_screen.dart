@@ -92,6 +92,9 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   double _mirrorHeight = 1080.0;
   int _castFrameVersion = 0;
 
+  // TV Güç Durumu (Mobil kumandadan kapatma / bekleme modu)
+  bool _isPowerOff = false;
+
   Future<void> _loadBufferSetting() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
@@ -257,6 +260,24 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
     // Telefondan Akıllı Web Kumanda Komutları
     _castService.onRemoteCommand = (action, value) {
       if (!mounted) return;
+
+      // 0. Güç Butonu Komutu (Her durumda çalışır)
+      if (action == 'power') {
+        setState(() {
+          _isPowerOff = !_isPowerOff;
+          if (_isPowerOff) {
+            _controller?.pause();
+            _controller?.setVolume(0.0);
+            _castVideoController?.pause();
+          } else {
+            _controller?.setVolume(1.0);
+            _controller?.play();
+          }
+        });
+        _showToast(_isPowerOff ? 'TV Bekleme Moduna Alındı' : 'TV Açıldı');
+        _syncChannelsWithCastService();
+        return;
+      }
 
       // 1. Ekranda bir modal/diyalog (Ayarlar, Çıkış vb.) açıksa D-Pad navigasyonunu o pencereye aktar
       if (_isSettingsOpen || _isExitDialogOpen) {
@@ -435,6 +456,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
               }
             });
             _channelService.saveChannelOrder(ordered);
+            SettingsDialog.globalChannelOrderNotifier.value = ordered;
             _syncChannelsWithCastService();
             _showToast('Kanal sıralaması telefondan güncellendi');
           }
@@ -1345,6 +1367,62 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
 
   @override
   Widget build(BuildContext context) {
+    if (_isPowerOff) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Focus(
+          autofocus: true,
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent) {
+              setState(() {
+                _isPowerOff = false;
+                _controller?.setVolume(1.0);
+                _controller?.play();
+              });
+              _showToast('TV Açıldı');
+              _syncChannelsWithCastService();
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+          child: GestureDetector(
+            onTap: () {
+              setState(() {
+                _isPowerOff = false;
+                _controller?.setVolume(1.0);
+                _controller?.play();
+              });
+              _showToast('TV Açıldı');
+              _syncChannelsWithCastService();
+            },
+            child: Container(
+              color: Colors.black,
+              width: double.infinity,
+              height: double.infinity,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.power_settings_new_rounded, color: Colors.white24, size: 72),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Bekleme Modu',
+                      style: TextStyle(color: Colors.white38, fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Açmak için kumandadan veya telefondan herhangi bir tuşa basın',
+                      style: TextStyle(color: Colors.white24, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {

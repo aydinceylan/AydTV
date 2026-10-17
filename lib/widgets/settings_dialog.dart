@@ -43,6 +43,8 @@ class SettingsDialog extends StatefulWidget {
     );
   }
 
+  static final ValueNotifier<List<Channel>?> globalChannelOrderNotifier = ValueNotifier<List<Channel>?>(null);
+
   @override
   State<SettingsDialog> createState() => _SettingsDialogState();
 }
@@ -60,7 +62,6 @@ class _SettingsDialogState extends State<SettingsDialog> {
   String _bufferMode = 'balanced';
   String _localIp = '127.0.0.1';
 
-  // Kanal Sıralama Durumu
   List<Channel> _orderableChannels = [];
   int? _movingChannelIndex;
 
@@ -74,6 +75,22 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _sleepService.onTick = () {
       if (mounted) setState(() {});
     };
+    SettingsDialog.globalChannelOrderNotifier.addListener(_onGlobalOrderChanged);
+  }
+
+  @override
+  void dispose() {
+    SettingsDialog.globalChannelOrderNotifier.removeListener(_onGlobalOrderChanged);
+    super.dispose();
+  }
+
+  void _onGlobalOrderChanged() {
+    if (mounted && SettingsDialog.globalChannelOrderNotifier.value != null) {
+      setState(() {
+        _orderableChannels = List.from(SettingsDialog.globalChannelOrderNotifier.value!);
+        _movingChannelIndex = null;
+      });
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -511,7 +528,16 @@ class _SettingsDialogState extends State<SettingsDialog> {
                           key == LogicalKeyboardKey.space ||
                           key == LogicalKeyboardKey.gameButtonA) {
                         setState(() {
-                          _movingChannelIndex = isMoving ? null : index;
+                          if (_movingChannelIndex != null) {
+                            if (_movingChannelIndex == index) {
+                              _movingChannelIndex = null;
+                            } else {
+                              _moveChannel(_movingChannelIndex!, index);
+                              _movingChannelIndex = null;
+                            }
+                          } else {
+                            _movingChannelIndex = index;
+                          }
                         });
                         return KeyEventResult.handled;
                       } else if (isMoving && (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.channelUp)) {
@@ -530,7 +556,16 @@ class _SettingsDialogState extends State<SettingsDialog> {
                       return InkWell(
                         onTap: () {
                           setState(() {
-                            _movingChannelIndex = isMoving ? null : index;
+                            if (_movingChannelIndex != null) {
+                              if (_movingChannelIndex == index) {
+                                _movingChannelIndex = null;
+                              } else {
+                                _moveChannel(_movingChannelIndex!, index);
+                                _movingChannelIndex = null;
+                              }
+                            } else {
+                              _movingChannelIndex = index;
+                            }
                           });
                         },
                         borderRadius: BorderRadius.circular(12),

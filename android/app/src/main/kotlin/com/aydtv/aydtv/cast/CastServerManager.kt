@@ -207,7 +207,7 @@ class CastServerManager(
     private fun getAirplayPlistXml(): String {
         val mac = getMacAddress()
         val feats = getAirplayFeatures()
-        val status = if (pinEnabled) 516 else 4
+        val status = if (pinEnabled) 516 else 68
         return """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -264,7 +264,7 @@ class CastServerManager(
             val macNoColon = mac.replace(":", "")
             val localIp = getLocalIpAddress()
             val featuresHex = getAirplayFeaturesHex()
-            val flagsStr = if (pinEnabled) "0x204" else "0x4"
+            val flagsStr = if (pinEnabled) "0x204" else "0x44"
             val pwStr = if (pinEnabled) "true" else "false"
 
             val hostAddrs = mutableListOf<InetAddress>()
@@ -1082,7 +1082,12 @@ class CastServerManager(
                             }
                         }
                         "power" -> {
-                            com.aydtv.aydtv.TvButtonAccessibilityService.performPowerDialog()
+                            try {
+                                com.aydtv.aydtv.TvButtonAccessibilityService.performPowerDialog()
+                            } catch (_: Exception) {}
+                            mainHandler.post {
+                                channel.invokeMethod("onRemoteCommand", mapOf("action" to "power"))
+                            }
                         }
                         else -> {
                             mainHandler.post {
@@ -1236,6 +1241,8 @@ class CastServerManager(
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#070A12">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2300E5FF'%3E%3Crect x='2' y='7' width='20' height='15' rx='3' ry='3' fill='%23101624' stroke='%2300E5FF' stroke-width='2'/%3E%3Cpolyline points='17 2 12 7 7 2' stroke='%2300E5FF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='10 11 10 17 15 14' fill='%2300E5FF'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2300E5FF'%3E%3Crect x='2' y='7' width='20' height='15' rx='3' ry='3' fill='%23101624' stroke='%2300E5FF' stroke-width='2'/%3E%3Cpolyline points='17 2 12 7 7 2' stroke='%2300E5FF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='10 11 10 17 15 14' fill='%2300E5FF'/%3E%3C/svg%3E">
   <title>AydTV Kumanda</title>
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; margin: 0; padding: 0; }
@@ -1256,9 +1263,19 @@ class CastServerManager(
     .status-badge {
       display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
       background: rgba(0, 230, 255, 0.08); border: 1px solid rgba(0, 230, 255, 0.25);
-      padding: 5px 12px; border-radius: 20px; color: #00E5FF;
+      padding: 5px 12px; border-radius: 20px; color: #00E5FF; transition: all 0.2s ease;
     }
-    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #00E5FF; box-shadow: 0 0 8px #00E5FF; animation: pulse 2s infinite; }
+    .status-badge.disconnected {
+      background: rgba(255, 82, 82, 0.12) !important;
+      border-color: rgba(255, 82, 82, 0.4) !important;
+      color: #FF5252 !important;
+    }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #00E5FF; box-shadow: 0 0 8px #00E5FF; animation: pulse 2s infinite; transition: all 0.2s ease; }
+    .status-dot.disconnected {
+      background: #FF5252 !important;
+      box-shadow: 0 0 8px #FF5252 !important;
+      animation: none !important;
+    }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
     /* Ana Konteyner */
@@ -1517,7 +1534,7 @@ class CastServerManager(
       </svg>
       AydTV Akıllı Kumanda
     </div>
-    <div class="status-badge"><span class="status-dot"></span> TV Bağlı</div>
+    <div class="status-badge" id="statusBadge"><span class="status-dot" id="statusDot"></span> <span id="statusText">TV Bağlı</span></div>
   </div>
 
   <div id="toast" class="toast">Komut iletildi</div>
@@ -1526,7 +1543,7 @@ class CastServerManager(
     <!-- 1. SEKME: KUMANDA -->
     <div id="tab-remote" class="tab-content active">
       <div class="remote-body">
-        <!-- Güç, Home, Mute, Ayarlar -->
+        <!-- Güç, Home, Mute, Menü -->
         <div class="btn-row">
           <div class="sys-btn danger" onclick="sendKey('power')">
             <svg viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
@@ -1541,7 +1558,7 @@ class CastServerManager(
             <span id="mute-label">Mute</span>
           </div>
           <div class="sys-btn" onclick="sendKey('settings')">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            <svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
             Menü
           </div>
         </div>
@@ -1874,7 +1891,7 @@ class CastServerManager(
       <div>Paylaş</div>
     </div>
     <div class="nav-item" onclick="switchTab('settings', this)">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      <svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
       <div>Ayarlar</div>
     </div>
   </div>
@@ -2214,12 +2231,33 @@ class CastServerManager(
     // --- CANLI DURUM & AYARLAR SENKRONİZASYONU (1.5 SN PERİYOT) ---
     var isPolling = false;
 
+    function setConnectionStatus(isConnected) {
+      var b = document.getElementById('statusBadge');
+      var d = document.getElementById('statusDot');
+      var t = document.getElementById('statusText');
+      if (b && d && t) {
+        if (isConnected) {
+          b.classList.remove('disconnected');
+          d.classList.remove('disconnected');
+          t.textContent = 'TV Bağlı';
+        } else {
+          b.classList.add('disconnected');
+          d.classList.add('disconnected');
+          t.textContent = 'Bağlantı Yok';
+        }
+      }
+    }
+
     function pollStatusAndSettings() {
       if (isPolling) return;
       isPolling = true;
 
       fetch('/api/status')
-        .then(function(res) { return res.json(); })
+        .then(function(res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          setConnectionStatus(true);
+          return res.json();
+        })
         .then(function(st) {
           if (!st) return;
           // 1. Canlı İzlenen Kanal
@@ -2278,7 +2316,9 @@ class CastServerManager(
             document.getElementById('switch-cast-pin').checked = s.cast_pin_enabled === true;
           updateSleepUI(s.sleep_minutes || 0);
         })
-        .catch(function(){})
+        .catch(function(){
+          setConnectionStatus(false);
+        })
         .finally(function() {
           isPolling = false;
         });

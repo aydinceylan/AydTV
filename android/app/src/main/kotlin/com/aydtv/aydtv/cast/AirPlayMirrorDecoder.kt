@@ -159,12 +159,6 @@ object AirPlayMirrorDecoder {
                         // Video Frame Paketi
                         if (payload.isEmpty()) return
 
-                        // UxPlay standardı: 0x05 kilit ekranı binary plist raporu olabilir
-                        if (pType == 5 && payload.size > 24000 && !isPlainH264Avcc(payload)) {
-                            Log.d(TAG, "AirPlay streaming report trailer packet skipped (size=${payload.size})")
-                            return
-                        }
-
                         // Codec hazır değilse başlatmayı dene
                         if (!isCodecRunning || mediaCodec == null) {
                             startCodecIfNeeded(currentWidth, currentHeight)
@@ -175,22 +169,25 @@ object AirPlayMirrorDecoder {
                         // UxPlay standardı: packet[4]==0 && packet[5]==0x10 -> IDR Keyframe
                         val isIdrFromHeader = (hBuf.size > 1 && (hBuf[1].toInt() and 0xFF) == 0x10)
 
-                        // 1. Video deşifreleme: aesCipher aktifse gelen tüm Type 0/5 paketlerini AES-CTR ile deşifre et
-                        val decryptedPayload = if (aesCipher != null) {
-                            decryptPacket(payload)
-                        } else {
-                            payload
+                        // 1. Video deşifreleme & NALU kontrolü:
+                        // Önce gelen verinin zaten şifresiz geçerli H.264 olup olmadığını sına
+                        var parseResult: Pair<ByteArray, Boolean>? = null
+                        if (isPlainH264Avcc(payload) || isAlreadyAnnexB(payload)) {
+                            parseResult = convertAvccToAnnexBStrict(payload)
+                                ?: if (isAlreadyAnnexB(payload)) Pair(payload, isIdrNalu(payload)) else null
                         }
 
-                        // 2. UxPlay standardı: AVCC'yi Annex-B'ye çevir ve H.264 NALU bütünlüğünü doğrula
-                        val parseResult = convertAvccToAnnexBStrict(decryptedPayload)
-                                       ?: if (isAlreadyAnnexB(decryptedPayload)) Pair(decryptedPayload, isIdrNalu(decryptedPayload)) else null
+                        // Eğer şifresiz olarak doğrulanamadıysa ve aesCipher mevcutsa AES-CTR ile deşifre et
+                        if (parseResult == null && aesCipher != null) {
+                            val decryptedPayload = decryptPacket(payload)
+                            parseResult = convertAvccToAnnexBStrict(decryptedPayload)
+                                ?: if (isAlreadyAnnexB(decryptedPayload)) Pair(decryptedPayload, isIdrNalu(decryptedPayload)) else null
+                        }
 
                         if (parseResult == null) {
                             if (frameCount < 10) {
                                 val hexRaw = payload.take(minOf(8, payload.size)).joinToString(" ") { "%02x".format(it) }
-                                val hexDec = decryptedPayload.take(minOf(8, decryptedPayload.size)).joinToString(" ") { "%02x".format(it) }
-                                Log.w(TAG, "Frame #$frameCount geçersiz H.264 NALU (raw=[$hexRaw], dec=[$hexDec], size=${payload.size}), atlandı.")
+                                Log.w(TAG, "Frame #$frameCount geçersiz H.264 NALU (raw=[$hexRaw], size=${payload.size}, cipher=${aesCipher != null}), atlandı.")
                             }
                             return
                         }
@@ -458,6 +455,7 @@ object AirPlayMirrorDecoder {
         val out = data.clone()
         var offset = 0
         var hasIdr = false
+        var nalCount = 0
 
         while (offset + 4 <= out.size) {
             val naluLen = ((out[offset].toInt() and 0xFF) shl 24) or
@@ -466,6 +464,23 @@ object AirPlayMirrorDecoder {
                           (out[offset + 3].toInt() and 0xFF)
 
             if (naluLen <= 0 || offset + 4 + naluLen > out.size) {
+                // Eğer geçerli NALU bulunduysa ve kalan baytlar azsa (hizalama/trailer), mevcut NALU'ları teslim et
+                if (nalCount > 0 && (out.size - offset) <= 32) {
+                    break
+                }
+                return null
+            }
+
+            // H.264 forbidden_zero_bit kontrolü (Bit 7 sıfır olmalıdır)
+            val header = out[offset + 4].toInt() and 0xFF
+            if ((header and 0x80) != 0) {
+                if (nalCount > 0) break
+                return null
+            }
+
+            val nalType = header and 0x1F
+            if (nalType !in 1..23) {
+                if (nalCount > 0) break
                 return null
             }
 
@@ -475,22 +490,17 @@ object AirPlayMirrorDecoder {
             out[offset + 2] = 0x00
             out[offset + 3] = 0x01
 
-            // H.264 forbidden_zero_bit kontrolü (Bit 7 sıfır olmalıdır)
-            val header = out[offset + 4].toInt() and 0xFF
-            if ((header and 0x80) != 0) {
-                return null
-            }
-
-            val nalType = header and 0x1F
             if (nalType == 5) {
                 hasIdr = true
             }
 
             offset += 4 + naluLen
+            nalCount++
         }
 
-        if (offset != out.size) return null
-        return Pair(out, hasIdr)
+        if (nalCount == 0) return null
+        val finalData = if (offset == out.size) out else out.copyOfRange(0, offset)
+        return Pair(finalData, hasIdr)
     }
 
     /**

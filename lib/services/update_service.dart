@@ -18,8 +18,8 @@ class UpdateInfo {
 }
 
 class UpdateService {
-  static const String currentVersion = '1.3.7';
-  static const String fallbackVersion = '1.3.7';
+  static const String currentVersion = '1.3.8';
+  static const String fallbackVersion = '1.3.8';
   static const String githubApiUrl =
       'https://api.github.com/repos/aydinceylan/AydTV/releases/latest';
   static const String _dismissedVersionKey = 'aydtv_dismissed_update_version';

@@ -68,9 +68,9 @@ class MainActivity : FlutterActivity() {
                 "getAppVersion" -> {
                     try {
                         val pInfo = packageManager.getPackageInfo(packageName, 0)
-                        result.success(pInfo.versionName ?: "1.3.7")
+                        result.success(pInfo.versionName ?: "1.3.8")
                     } catch (_: Exception) {
-                        result.success("1.3.7")
+                        result.success("1.3.8")
                     }
                 }
                 else -> {
