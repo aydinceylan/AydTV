@@ -49,10 +49,8 @@ class CastServerManager(
     }
 
     fun showPin(clientName: String) {
-        if (activePinCode == null) {
-            activePinCode = String.format("%04d", (1000..9999).random())
-            notifyShowPinCode(activePinCode!!, clientName)
-        }
+        val pin = activePinCode ?: String.format("%04d", (1000..9999).random()).also { activePinCode = it }
+        notifyShowPinCode(pin, clientName)
         pinExpiryRunnable?.let { mainHandler.removeCallbacks(it) }
         pinExpiryRunnable = Runnable {
             hidePin()
@@ -203,13 +201,13 @@ class CastServerManager(
         return "93:8D:98:6C:3F:65"
     }
 
-    private fun getAirplayFeatures(): Long = 130367356919L
-    private fun getAirplayFeaturesHex(): String = "0x5A7FFFF7,0x1E"
+    private fun getAirplayFeatures(): Long = 0x5A7FFEE6L
+    private fun getAirplayFeaturesHex(): String = "0x5A7FFEE6"
 
     private fun getAirplayPlistXml(): String {
         val mac = getMacAddress()
         val feats = getAirplayFeatures()
-        val status = if (pinEnabled) 580 else 516
+        val status = if (pinEnabled) 516 else 4
         return """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -217,15 +215,15 @@ class CastServerManager(
 	<key>name</key><string>$deviceName</string>
 	<key>deviceID</key><string>$mac</string>
 	<key>macAddress</key><string>$mac</string>
-	<key>model</key><string>AppleTV5,3</string>
-	<key>sourceVersion</key><string>377.17.24.4</string>
+	<key>model</key><string>AppleTV2,1</string>
+	<key>sourceVersion</key><string>220.68</string>
 	<key>protovers</key><string>1.1</string>
 	<key>statusFlags</key><integer>$status</integer>
 	<key>features</key><integer>$feats</integer>
 	<key>vv</key><integer>2</integer>
 	<key>keepAliveLowPower</key><integer>1</integer>
 	<key>keepAliveSendStatsAsBody</key><integer>1</integer>
-	<key>pi</key><string>b08f5a79-db29-4384-b456-a4784d9e6055</string>
+	<key>pi</key><string>2e388006-13ba-4041-9a67-25dd4a43d536</string>
 	<key>pk</key><data>${CastCryptoHelper.getPublicKeyBase64()}</data>
 	<key>displays</key>
 	<array>
@@ -266,7 +264,7 @@ class CastServerManager(
             val macNoColon = mac.replace(":", "")
             val localIp = getLocalIpAddress()
             val featuresHex = getAirplayFeaturesHex()
-            val flagsStr = if (pinEnabled) "0x244" else "0x204"
+            val flagsStr = if (pinEnabled) "0x204" else "0x4"
             val pwStr = if (pinEnabled) "true" else "false"
 
             val hostAddrs = mutableListOf<InetAddress>()
@@ -287,22 +285,22 @@ class CastServerManager(
                 try { hostAddrs.add(InetAddress.getByName(localIp)) } catch (_: Exception) {}
             }
 
-            // 1. Evrensel Standart AirPlay Servisi (AppleTV5,3 - Mac & iOS 14/15/16/17/18 Uyumlu)
+            // 1. Evrensel Standart AirPlay Servisi (AppleTV2,1 - Mac & iOS Uyumlu)
             val airplayService = NsdServiceInfo().apply {
                 serviceName = deviceName
                 serviceType = "_airplay._tcp"
                 port = AIRPLAY_PORT
                 setAttribute("deviceid", mac)
                 setAttribute("features", featuresHex)
-                setAttribute("model", "AppleTV5,3")
-                setAttribute("srcvers", "377.17.24.4")
+                setAttribute("model", "AppleTV2,1")
+                setAttribute("srcvers", "220.68")
                 setAttribute("protovers", "1.1")
                 setAttribute("flags", flagsStr)
                 setAttribute("vv", "2")
                 setAttribute("acl", "0")
                 setAttribute("pw", pwStr)
                 setAttribute("pk", CastCryptoHelper.getPublicKeyHex())
-                setAttribute("pi", "b08f5a79-db29-4384-b456-a4784d9e6055")
+                setAttribute("pi", "2e388006-13ba-4041-9a67-25dd4a43d536")
                 if (Build.VERSION.SDK_INT >= 34) {
                     try {
                         setHostAddresses(hostAddrs)
@@ -337,8 +335,8 @@ class CastServerManager(
                 setAttribute("vn", "65537")
                 setAttribute("da", "true")
                 setAttribute("md", "0,1,2")
-                setAttribute("am", "AppleTV5,3")
-                setAttribute("vs", "377.17.24.4")
+                setAttribute("am", "AppleTV2,1")
+                setAttribute("vs", "220.68")
                 setAttribute("sf", flagsStr)
                 setAttribute("pw", pwStr)
                 setAttribute("features", featuresHex)
@@ -612,6 +610,7 @@ class CastServerManager(
                 sendRtspResponse(output, 200, "OK", cseq, "text/x-apple-plist+xml", plist)
             }
             method in listOf("POST", "GET") && path.startsWith("/pair-pin-start") -> {
+                activePinCode = null
                 showPin(clientName)
                 sendRtspResponse(output, 200, "OK", cseq)
             }
@@ -788,6 +787,7 @@ class CastServerManager(
                 sendHttpResponse(output, 200, "OK", "text/x-apple-plist+xml", xmlInfo, cseq)
             }
             path.startsWith("/pair-pin-start") -> {
+                activePinCode = null
                 showPin(clientName)
                 sendHttpResponse(output, 200, "OK", "text/plain", "OK", cseq)
             }

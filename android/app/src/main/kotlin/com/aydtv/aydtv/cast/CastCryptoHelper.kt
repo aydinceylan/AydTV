@@ -165,10 +165,9 @@ object CastCryptoHelper {
             System.arraycopy(serverEcdhPubBytes, 0, verifyResp, 0, 32)
             System.arraycopy(encryptedSignature, 0, verifyResp, 32, 64)
 
-            // Canlı ekran (Type 110 stream) için anahtarları kaydet
             lastSharedSecret = sharedSecret
             lastAesKey = aesKey
-            lastEcdhSecret = clientEcdhPubBytes
+            lastEcdhSecret = sharedSecret // Gerçek X25519 Diffie-Hellman ortak gizli anahtarı
             context?.let { saveKeysToDisk(it) }
 
             Log.i(TAG, "Pair-Verify Step 1 kriptografik el sıkışma başarıyla tamamlandı (96 bayt).")
@@ -302,23 +301,35 @@ object CastCryptoHelper {
         val rawHex = rawAesKey.joinToString("") { "%02x".format(it) }
         Log.i(TAG, "AirPlay Playfair rawAesKey başarıyla çözüldü (16 bayt): $rawHex")
 
-        // UxPlay standardı: FairPlay SAP v3 ile çözülen rawAesKey doğrudan kök anahtardır.
-        // ecdhSecret ile ASLA SHA-512 yapılmaz!
-        val finalAesKey = rawAesKey
+        // RPiPlay / AirPlay standardı:
+        // 1. eaeskey = SHA-512(rawAesKey[0..16] + sharedSecret[0..32])
+        val ecdhSecret = lastSharedSecret ?: lastEcdhSecret
+        val eaesKey16 = if (ecdhSecret != null && ecdhSecret.size >= 32) {
+            val mdEaes = MessageDigest.getInstance("SHA-512")
+            mdEaes.update(rawAesKey, 0, 16)
+            mdEaes.update(ecdhSecret, 0, 32)
+            val digest = mdEaes.digest()
+            val secHex = ecdhSecret.take(8).joinToString("") { "%02x".format(it) }
+            Log.i(TAG, "AirPlay eaesKey türetildi (sharedSecret=$secHex...)")
+            digest.copyOfRange(0, 16)
+        } else {
+            Log.w(TAG, "AirPlay ecdhSecret bulunamadı, doğrudan rawAesKey kullanılıyor.")
+            rawAesKey
+        }
 
-        // Video AES-128-CTR anahtar ve IV türetimi (UxPlay / RPiPlay standardı)
+        // 2. Video AES-128-CTR anahtar ve IV türetimi (UxPlay / RPiPlay standardı)
         val streamIdStr = java.lang.Long.toUnsignedString(streamConnectionId)
         val skeyall = "AirPlayStreamKey$streamIdStr".toByteArray(Charsets.UTF_8)
         val sivall = "AirPlayStreamIV$streamIdStr".toByteArray(Charsets.UTF_8)
 
         val md = MessageDigest.getInstance("SHA-512")
         md.update(skeyall)
-        md.update(finalAesKey, 0, 16)
+        md.update(eaesKey16, 0, 16)
         val videoKey = md.digest().copyOfRange(0, 16)
 
         md.reset()
         md.update(sivall)
-        md.update(finalAesKey, 0, 16)
+        md.update(eaesKey16, 0, 16)
         val videoIv = md.digest().copyOfRange(0, 16)
 
         val keyHex = videoKey.joinToString("") { "%02x".format(it) }

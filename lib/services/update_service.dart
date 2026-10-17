@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:ota_update/ota_update.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,10 +18,20 @@ class UpdateInfo {
 }
 
 class UpdateService {
-  static const String currentVersion = '1.3.1';
+  static const String fallbackVersion = '1.3.7';
   static const String githubApiUrl =
       'https://api.github.com/repos/aydinceylan/AydTV/releases/latest';
   static const String _dismissedVersionKey = 'aydtv_dismissed_update_version';
+  static const MethodChannel _systemChannel = MethodChannel('com.aydtv.aydtv/system');
+
+  /// Cihazda kurulu olan gerçek uygulama sürümünü alır
+  Future<String> getCurrentVersion() async {
+    try {
+      final ver = await _systemChannel.invokeMethod<String>('getAppVersion');
+      if (ver != null && ver.isNotEmpty) return ver.trim();
+    } catch (_) {}
+    return fallbackVersion;
+  }
 
   /// GitHub Releases üzerinden yeni APK olup olmadığını kontrol eder
   Future<UpdateInfo?> checkForUpdate() async {
@@ -42,6 +53,7 @@ class UpdateService {
           return null;
         }
 
+        final currentVersion = await getCurrentVersion();
         if (_isNewerVersion(tagName, currentVersion)) {
           final assets = data['assets'] as List<dynamic>?;
           if (assets != null) {

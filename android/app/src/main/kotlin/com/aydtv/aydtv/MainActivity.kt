@@ -65,6 +65,14 @@ class MainActivity : FlutterActivity() {
                 "isAccessibilityEnabled" -> {
                     result.success(isAccessibilityServiceEnabled())
                 }
+                "getAppVersion" -> {
+                    try {
+                        val pInfo = packageManager.getPackageInfo(packageName, 0)
+                        result.success(pInfo.versionName ?: "1.3.7")
+                    } catch (_: Exception) {
+                        result.success("1.3.7")
+                    }
+                }
                 else -> {
                     result.notImplemented()
                 }
@@ -134,6 +142,10 @@ class MainActivity : FlutterActivity() {
                 "updateSettings" -> {
                     val json = call.argument<String>("json") ?: "{}"
                     castServerManager?.updateSettings(json)
+                    result.success(true)
+                }
+                "hidePin" -> {
+                    castServerManager?.hidePin()
                     result.success(true)
                 }
                 else -> {

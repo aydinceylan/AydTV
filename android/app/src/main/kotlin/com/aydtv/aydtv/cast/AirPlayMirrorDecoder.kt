@@ -175,8 +175,8 @@ object AirPlayMirrorDecoder {
                         // UxPlay standardı: packet[4]==0 && packet[5]==0x10 -> IDR Keyframe
                         val isIdrFromHeader = (hBuf.size > 1 && (hBuf[1].toInt() and 0xFF) == 0x10)
 
-                        // 1. Akıllı deşifreleme: şifresiz mi yoksa AES-CTR ile mi deşifre edilecek?
-                        val decryptedPayload = if (aesCipher != null && !isPlainH264Avcc(payload)) {
+                        // 1. Video deşifreleme: aesCipher aktifse gelen tüm Type 0/5 paketlerini AES-CTR ile deşifre et
+                        val decryptedPayload = if (aesCipher != null) {
                             decryptPacket(payload)
                         } else {
                             payload
