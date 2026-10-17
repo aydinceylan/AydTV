@@ -299,17 +299,12 @@ object CastCryptoHelper {
             return null
         }
 
-        // Eğer pairing (pair-verify) ile ecdhSecret üretildiyse SHA-512 ile hash'le
-        val ecdhSecret = lastEcdhSecret
-        val finalAesKey = if (ecdhSecret != null && ecdhSecret.size >= 32) {
-            val md = MessageDigest.getInstance("SHA-512")
-            md.update(rawAesKey, 0, 16)
-            md.update(ecdhSecret, 0, 32)
-            val digest = md.digest()
-            digest.copyOfRange(0, 16)
-        } else {
-            rawAesKey
-        }
+        val rawHex = rawAesKey.joinToString("") { "%02x".format(it) }
+        Log.i(TAG, "AirPlay Playfair rawAesKey başarıyla çözüldü (16 bayt): $rawHex")
+
+        // UxPlay standardı: FairPlay SAP v3 ile çözülen rawAesKey doğrudan kök anahtardır.
+        // ecdhSecret ile ASLA SHA-512 yapılmaz!
+        val finalAesKey = rawAesKey
 
         // Video AES-128-CTR anahtar ve IV türetimi (UxPlay / RPiPlay standardı)
         val streamIdStr = java.lang.Long.toUnsignedString(streamConnectionId)

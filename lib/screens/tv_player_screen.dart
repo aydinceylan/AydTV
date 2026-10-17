@@ -977,6 +977,12 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
         return;
       }
 
+      // Cast veya Canlı Ekran Yansıtma aktifken TV yayını donma dedektörü çalıştırılmaz
+      if (_isCasting || _mirrorTextureId != null) {
+        _stuckCounter = 0;
+        return;
+      }
+
       // Canlı TV yayınında GERÇEK donma kriterleri:
       // 1) Oynatıcı tampon bekliyor (val.isBuffering == true)
       // 2) Veya oynatıcı durmuş ve oynamıyor (!val.isPlaying)
