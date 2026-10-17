@@ -68,10 +68,29 @@ class MainActivity : FlutterActivity() {
                 "getAppVersion" -> {
                     try {
                         val pInfo = packageManager.getPackageInfo(packageName, 0)
-                        result.success(pInfo.versionName ?: "1.3.8")
+                        result.success(pInfo.versionName ?: "1.3.9")
                     } catch (_: Exception) {
-                        result.success("1.3.8")
+                        result.success("1.3.9")
                     }
+                }
+                "setScreenSleepAllowed" -> {
+                    val allowed = call.argument<Boolean>("allowed") ?: false
+                    runOnUiThread {
+                        if (allowed) {
+                            window.clearFlags(
+                                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                            )
+                        } else {
+                            window.addFlags(
+                                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                            )
+                        }
+                    }
+                    result.success(true)
                 }
                 else -> {
                     result.notImplemented()

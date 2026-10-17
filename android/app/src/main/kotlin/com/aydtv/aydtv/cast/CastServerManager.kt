@@ -30,6 +30,7 @@ class CastServerManager(
     private var multicastLock: WifiManager.MulticastLock? = null
 
     private var airplayServerSocket: ServerSocket? = null
+    private var mirrorServerSocket: ServerSocket? = null
     private var raopServerSocket: ServerSocket? = null
     private var webRemoteServerSocket: ServerSocket? = null
 
@@ -75,6 +76,7 @@ class CastServerManager(
 
     companion object {
         const val AIRPLAY_PORT = 7000
+        const val MIRROR_DATA_PORT = 7100
         const val RAOP_PORT = 5000
         const val WEB_REMOTE_PORT = 8088
     }
@@ -126,6 +128,7 @@ class CastServerManager(
         try {
             activeClientSocket?.close()
             airplayServerSocket?.close()
+            mirrorServerSocket?.close()
             raopServerSocket?.close()
             webRemoteServerSocket?.close()
         } catch (_: Exception) {}
@@ -134,6 +137,7 @@ class CastServerManager(
 
         activeClientSocket = null
         airplayServerSocket = null
+        mirrorServerSocket = null
         raopServerSocket = null
         webRemoteServerSocket = null
     }
@@ -388,7 +392,24 @@ class CastServerManager(
             } catch (_: Exception) {}
         }
 
-        // 2. Yedek RAOP Portu (Port 5000 - Klasik AirTunes / Ses İstemcileri İçin)
+        // 2. Video Mirroring Data Portu (Port 7100 - Standart AirPlay Mirroring TCP Stream)
+        executor.execute {
+            try {
+                mirrorServerSocket = ServerSocket(MIRROR_DATA_PORT).apply {
+                    reuseAddress = true
+                }
+                android.util.Log.i("CastServer", "AirPlay Mirroring DataPort 7100 dinleniyor...")
+                while (isRunning && mirrorServerSocket?.isClosed == false) {
+                    val client = mirrorServerSocket?.accept() ?: break
+                    android.util.Log.i("CastServer", "Video Mirroring stream Port 7100 bağlandı: ${client.inetAddress.hostAddress}")
+                    executor.execute { handleMirrorStreamClient(client) }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("CastServer", "Port 7100 mirror server hatası: ${e.message}")
+            }
+        }
+
+        // 3. Yedek RAOP Portu (Port 5000 - Klasik AirTunes / Ses İstemcileri İçin)
         executor.execute {
             try {
                 raopServerSocket = ServerSocket(RAOP_PORT).apply {
@@ -399,6 +420,57 @@ class CastServerManager(
                     executor.execute { handleAirplayClient(client) }
                 }
             } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Port 7100 üzerinden gelen saf video akışını kesintisiz okuyup AirPlayMirrorDecoder'a aktarır.
+     */
+    private fun handleMirrorStreamClient(socket: Socket) {
+        try {
+            socket.tcpNoDelay = true
+            socket.receiveBufferSize = 1024 * 1024
+            val rawInput = socket.getInputStream()
+            android.util.Log.i("CastServer", "Port 7100 video veri okuma döngüsü başladı...")
+
+            while (isRunning && !socket.isClosed) {
+                val p0 = rawInput.read()
+                val p1 = rawInput.read()
+                val p2 = rawInput.read()
+                val p3 = rawInput.read()
+                if (p0 == -1 || p1 == -1 || p2 == -1 || p3 == -1) break
+
+                val payloadSize = (p0 and 0xFF) or ((p1 and 0xFF) shl 8) or ((p2 and 0xFF) shl 16) or ((p3 and 0xFF) shl 24)
+                if (payloadSize in 0..20_000_000) {
+                    var headerSkip = 0
+                    val hBuf = ByteArray(124)
+                    while (headerSkip < 124) {
+                        val r = rawInput.read(hBuf, headerSkip, 124 - headerSkip)
+                        if (r == -1) break
+                        headerSkip += r
+                    }
+                    if (headerSkip < 124) break
+
+                    val payloadType = hBuf[0].toInt() and 0xFF
+                    val payloadOption = (hBuf[2].toInt() and 0xFF) or ((hBuf[3].toInt() and 0xFF) shl 8)
+
+                    val pBuf = ByteArray(payloadSize)
+                    var pRead = 0
+                    while (pRead < payloadSize) {
+                        val r = rawInput.read(pBuf, pRead, payloadSize - pRead)
+                        if (r == -1) break
+                        pRead += r
+                    }
+                    if (pRead < payloadSize) break
+
+                    AirPlayMirrorDecoder.feedPacket(payloadType, payloadOption, hBuf, pBuf)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("CastServer", "Port 7100 video okuma uyarısı: ${e.message}")
+        } finally {
+            try { socket.close() } catch (_: Exception) {}
+            android.util.Log.i("CastServer", "Port 7100 video stream bağlantısı sonlandı.")
         }
     }
 
@@ -714,11 +786,11 @@ class CastServerManager(
 <plist version="1.0">
 <dict>
 	<key>eventPort</key><integer>7000</integer>
-	<key>timingPort</key><integer>7000</integer>
+	<key>timingPort</key><integer>7011</integer>
 	<key>streams</key>
 	<array>
 		<dict>
-			<key>dataPort</key><integer>7000</integer>
+			<key>dataPort</key><integer>7100</integer>
 			<key>type</key><integer>110</integer>
 		</dict>
 	</array>

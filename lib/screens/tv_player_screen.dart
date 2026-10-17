@@ -95,6 +95,25 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
   // TV Güç Durumu (Mobil kumandadan kapatma / bekleme modu)
   bool _isPowerOff = false;
 
+  void _setPowerState(bool powerOff) {
+    if (!mounted) return;
+    setState(() {
+      _isPowerOff = powerOff;
+      if (_isPowerOff) {
+        _controller?.pause();
+        _controller?.setVolume(0.0);
+        _castVideoController?.pause();
+        const MethodChannel('com.aydtv.aydtv/system').invokeMethod('setScreenSleepAllowed', {'allowed': true});
+      } else {
+        _controller?.setVolume(1.0);
+        _controller?.play();
+        const MethodChannel('com.aydtv.aydtv/system').invokeMethod('setScreenSleepAllowed', {'allowed': false});
+      }
+    });
+    _showToast(_isPowerOff ? 'TV Bekleme Moduna Alındı' : 'TV Açıldı');
+    _syncChannelsWithCastService();
+  }
+
   Future<void> _loadBufferSetting() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
@@ -263,19 +282,7 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
 
       // 0. Güç Butonu Komutu (Her durumda çalışır)
       if (action == 'power') {
-        setState(() {
-          _isPowerOff = !_isPowerOff;
-          if (_isPowerOff) {
-            _controller?.pause();
-            _controller?.setVolume(0.0);
-            _castVideoController?.pause();
-          } else {
-            _controller?.setVolume(1.0);
-            _controller?.play();
-          }
-        });
-        _showToast(_isPowerOff ? 'TV Bekleme Moduna Alındı' : 'TV Açıldı');
-        _syncChannelsWithCastService();
+        _setPowerState(!_isPowerOff);
         return;
       }
 
@@ -1374,49 +1381,19 @@ class _TVPlayerScreenState extends State<TVPlayerScreen> with WidgetsBindingObse
           autofocus: true,
           onKeyEvent: (node, event) {
             if (event is KeyDownEvent) {
-              setState(() {
-                _isPowerOff = false;
-                _controller?.setVolume(1.0);
-                _controller?.play();
-              });
-              _showToast('TV Açıldı');
-              _syncChannelsWithCastService();
+              _setPowerState(false);
               return KeyEventResult.handled;
             }
             return KeyEventResult.ignored;
           },
           child: GestureDetector(
             onTap: () {
-              setState(() {
-                _isPowerOff = false;
-                _controller?.setVolume(1.0);
-                _controller?.play();
-              });
-              _showToast('TV Açıldı');
-              _syncChannelsWithCastService();
+              _setPowerState(false);
             },
             child: Container(
               color: Colors.black,
               width: double.infinity,
               height: double.infinity,
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.power_settings_new_rounded, color: Colors.white24, size: 72),
-                    const SizedBox(height: 18),
-                    const Text(
-                      'Bekleme Modu',
-                      style: TextStyle(color: Colors.white38, fontSize: 20, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Açmak için kumandadan veya telefondan herhangi bir tuşa basın',
-                      style: TextStyle(color: Colors.white24, fontSize: 13),
-                    ),
-                  ],
-                ),
-              ),
             ),
           ),
         ),
